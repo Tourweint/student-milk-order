@@ -7,7 +7,8 @@ const authApi = require('../../api/auth')
 Page({
   data: {
     user: null,
-    roleText: ''
+    roleText: '',
+    avatarChar: '家'
   },
 
   onShow() {
@@ -17,8 +18,18 @@ Page({
       return
     }
     const local = auth.getUser()
-    this.setData({ user: local, roleText: this.roleText(local) })
+    this.setData({
+      user: local,
+      roleText: this.roleText(local),
+      avatarChar: this.avatarCharOf(local)
+    })
     this.refreshUser()
+  },
+
+  /** 头像首字：姓名/用户名首字，兜底"家" */
+  avatarCharOf(u) {
+    const name = (u && (u.realName || u.username)) || ''
+    return name ? name.charAt(0) : '家'
   },
 
   /** 拉取最新用户信息（后端为准） */
@@ -32,7 +43,11 @@ Page({
           realName: me.realName,
           roles: me.roles || []
         })
-        this.setData({ user: me, roleText: this.roleText(me) })
+        this.setData({
+          user: me,
+          roleText: this.roleText(me),
+          avatarChar: this.avatarCharOf(me)
+        })
       }
     } catch (e) {
       console.error('获取用户信息失败', e)

@@ -79,10 +79,17 @@ Page({
         }),
         { ml: 0, energy: 0, protein: 0, fat: 0, calcium: 0, count: 0 }
       )
+      // 格式化显示文本（WXML 不支持 toFixed 函数调用）
+      const totalsView = {
+        ml: totals.ml,
+        energy: totals.energy.toFixed(1),
+        protein: totals.protein.toFixed(1),
+        calcium: totals.calcium.toFixed(0)
+      }
       const list = (intakePage && intakePage.list) || []
       this.setData({
         summaryList,
-        totals,
+        totals: totalsView,
         records: this.data.pageNum === 1 ? list : this.data.records.concat(list),
         hasMore: this.data.records.length + list.length < ((intakePage && intakePage.total) || 0),
         pageNum: this.data.pageNum + 1

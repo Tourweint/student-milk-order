@@ -20,15 +20,15 @@
           <view class="metric-label">总摄入(ml)</view>
         </view>
         <view class="metric">
-          <view class="metric-value">{{totals.energy.toFixed(1)}}</view>
+          <view class="metric-value">{{totals.energy}}</view>
           <view class="metric-label">能量(kJ)</view>
         </view>
         <view class="metric">
-          <view class="metric-value">{{totals.protein.toFixed(1)}}</view>
+          <view class="metric-value">{{totals.protein}}</view>
           <view class="metric-label">蛋白质(g)</view>
         </view>
         <view class="metric">
-          <view class="metric-value">{{totals.calcium.toFixed(0)}}</view>
+          <view class="metric-value">{{totals.calcium}}</view>
           <view class="metric-label">钙(mg)</view>
         </view>
       </view>

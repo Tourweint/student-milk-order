@@ -1,7 +1,7 @@
 <view class="container">
   <!-- 用户卡片 -->
   <view class="user-card">
-    <view class="avatar">{{(user.realName || user.username || '家')[0]}}</view>
+    <view class="avatar">{{avatarChar}}</view>
     <view class="user-info">
       <view class="user-name">{{user.realName || user.username || '未登录'}}</view>
       <view class="user-meta">
