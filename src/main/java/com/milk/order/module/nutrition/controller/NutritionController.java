@@ -60,7 +60,7 @@ public class NutritionController {
 
     @GetMapping("/intake/summary")
     public ApiResponse<List<NutritionSummaryVO>> intakeSummary(
-            @RequestParam Long studentId,
+            @RequestParam(required = false) Long studentId,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
         return ApiResponse.success(nutritionInfoService.summaryByStudent(studentId, startDate, endDate));

@@ -1,0 +1,61 @@
+.rec {
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.rec:last-child {
+  border-bottom: none;
+}
+
+.rec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rec-date {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.rec-status {
+  font-size: 24rpx;
+  border-radius: 8rpx;
+  padding: 4rpx 16rpx;
+}
+
+.signed {
+  color: #67c23a;
+  background: #f0f9eb;
+}
+
+.unsigned {
+  color: #e6a23c;
+  background: #fdf6ec;
+}
+
+.rec-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 12rpx;
+}
+
+.rec-name {
+  font-size: 28rpx;
+  color: #303133;
+  font-weight: 500;
+}
+
+.rec-meta {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+.rec-sign {
+  font-size: 22rpx;
+  color: #67c23a;
+  text-align: right;
+}

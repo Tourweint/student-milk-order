@@ -1,0 +1,55 @@
+<view class="page">
+  <view class="container">
+    <!-- 续订计划列表 -->
+    <view class="card plan" wx:for="{{plans}}" wx:key="id" wx:if="{{plans.length}}">
+      <view class="plan-head">
+        <text class="plan-name">{{item.packageName || '奶品套餐'}}</text>
+        <text class="plan-status {{item.status === 1 ? 'on' : 'off'}}">{{item.statusText}}</text>
+      </view>
+      <view class="plan-row"><text class="plan-label">学生</text><text>{{item.studentName}}</text></view>
+      <view class="plan-row"><text class="plan-label">原订单</text><text>{{item.originalOrderNo}}</text></view>
+      <view class="plan-row"><text class="plan-label">周期</text><text>{{item.cycleTypeText}}</text></view>
+      <view class="plan-row"><text class="plan-label">下次续订</text><text>{{item.nextRenewalTime || '—'}}</text></view>
+      <view class="plan-row" wx:if="{{item.remark}}"><text class="plan-label">备注</text><text>{{item.remark}}</text></view>
+      <view class="plan-actions" wx:if="{{item.status === 1}}">
+        <view class="mini-btn" bindtap="handleTrigger" data-id="{{item.id}}">立即续订</view>
+        <view class="mini-btn mini-danger" bindtap="handleClose" data-id="{{item.id}}">关闭</view>
+      </view>
+    </view>
+    <view wx:if="{{plans.length && loading}}" class="empty">加载中…</view>
+    <view wx:if="{{plans.length && !hasMore}}" class="empty">— 没有更多了 —</view>
+
+    <view wx:if="{{!plans.length && loading}}" class="empty">加载中…</view>
+    <view wx:if="{{!plans.length && !loading}}" class="empty">暂无续订计划</view>
+
+    <!-- 开启续订按钮 -->
+    <view class="add-btn" bindtap="openCreate">＋ 开启自动续订</view>
+  </view>
+
+  <!-- 开启续订表单（半屏） -->
+  <view class="mask" wx:if="{{showCreate}}" bindtap="closeCreate"></view>
+  <view class="sheet {{showCreate ? 'sheet-show' : ''}}">
+    <view class="sheet-title">开启自动续订</view>
+    <view class="sheet-row"><text class="sheet-label">学生</text><text>{{student.studentName}}</text></view>
+    <view class="sheet-row">
+      <text class="sheet-label">套餐</text>
+      <picker mode="selector" range="{{packages}}" range-key="packageName" value="{{packageIndex}}" bindchange="onPkgChange">
+        <view class="sheet-picker">{{packages[packageIndex].packageName || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="sheet-row">
+      <text class="sheet-label">原订单</text>
+      <picker mode="selector" range="{{paidOrders}}" range-key="orderNo" value="{{orderIndex}}" bindchange="onOrderChange">
+        <view class="sheet-picker sheet-picker-long">{{paidOrders[orderIndex].orderNo || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="sheet-row">
+      <text class="sheet-label">备注</text>
+      <input class="sheet-input" placeholder="选填" value="{{remark}}" bindinput="onRemarkInput" />
+    </view>
+    <view class="sheet-actions">
+      <view class="sheet-btn" bindtap="closeCreate">取消</view>
+      <view class="sheet-btn sheet-primary" bindtap="submitCreate" loading="{{creating}}">确认开启</view>
+    </view>
+  </view>
+</view>

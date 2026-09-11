@@ -1,0 +1,114 @@
+.ranges {
+  display: flex;
+  background: #ffffff;
+  padding: 20rpx 24rpx;
+  gap: 16rpx;
+  border-bottom: 1rpx solid #ebeef5;
+}
+
+.range-item {
+  padding: 12rpx 32rpx;
+  border-radius: 30rpx;
+  background: #f0f2f5;
+  font-size: 26rpx;
+  color: #606266;
+}
+
+.range-active {
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 600;
+}
+
+.metric-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.metric {
+  width: 50%;
+  box-sizing: border-box;
+  padding: 20rpx 0;
+  text-align: center;
+}
+
+.metric-value {
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #409eff;
+}
+
+.metric-label {
+  font-size: 24rpx;
+  color: #909399;
+  margin-top: 8rpx;
+}
+
+/* 每日汇总 */
+.day-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.day-item:last-child {
+  border-bottom: none;
+}
+
+.day-date {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.day-meta {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+.day-right {
+  text-align: right;
+  font-size: 26rpx;
+  color: #303133;
+}
+
+.day-sub {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+/* 摄入记录 */
+.rec-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.rec-item:last-child {
+  border-bottom: none;
+}
+
+.rec-name {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #1f2d3d;
+}
+
+.rec-meta {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+.rec-right {
+  text-align: right;
+}
+
+.rec-energy {
+  font-size: 28rpx;
+  color: #303133;
+}

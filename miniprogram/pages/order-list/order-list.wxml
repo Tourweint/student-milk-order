@@ -12,7 +12,7 @@
 
   <!-- 订单列表 -->
   <view class="container" wx:if="{{orders.length}}">
-    <view class="card order-card" wx:for="{{orders}}" wx:key="id">
+    <view class="card order-card" wx:for="{{orders}}" wx:key="id" bindtap="goDetail" data-id="{{item.id}}">
       <view class="order-head">
         <text class="order-no">{{item.orderNo}}</text>
         <text class="order-status status-{{item.status}}">{{item.statusText}}</text>
@@ -33,8 +33,8 @@
       <view class="order-foot">
         <text class="order-time">下单 {{item.createTime}}</text>
         <view class="order-actions">
-          <view wx:if="{{item.status === 1}}" class="action-btn action-primary" bindtap="handlePay" data-id="{{item.id}}">去支付</view>
-          <view wx:if="{{item.status === 2}}" class="action-btn" bindtap="handleCancel" data-id="{{item.id}}">退订</view>
+          <view wx:if="{{item.status === 1}}" class="action-btn action-primary" catchtap="handlePay" data-id="{{item.id}}">去支付</view>
+          <view wx:if="{{item.status === 2}}" class="action-btn" catchtap="handleCancel" data-id="{{item.id}}">退订</view>
         </view>
       </view>
     </view>

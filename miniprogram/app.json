@@ -5,7 +5,11 @@
     "pages/mine/mine",
     "pages/product/product",
     "pages/order-create/order-create",
-    "pages/order-list/order-list"
+    "pages/order-list/order-list",
+    "pages/order-detail/order-detail",
+    "pages/nutrition/nutrition",
+    "pages/delivery/delivery",
+    "pages/subscription/subscription"
   ],
   "window": {
     "navigationBarTitleText": "学生奶订购",

@@ -78,6 +78,12 @@ Page({
     this.loadOrders(false)
   },
 
+  /** 查看订单详情 */
+  goDetail(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    wx.navigateTo({ url: '/pages/order-detail/order-detail?id=' + id })
+  },
+
   /** 去支付（模拟支付） */
   async handlePay(e) {
     const id = Number(e.currentTarget.dataset.id)

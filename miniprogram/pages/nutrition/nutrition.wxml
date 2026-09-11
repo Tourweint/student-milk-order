@@ -1,0 +1,73 @@
+<view class="page">
+  <!-- 日期范围 -->
+  <view class="ranges">
+    <view
+      wx:for="{{ranges}}"
+      wx:key="days"
+      class="range-item {{activeDays === item.days ? 'range-active' : ''}}"
+      bindtap="switchRange"
+      data-days="{{item.days}}"
+    >{{item.label}}</view>
+  </view>
+
+  <view class="container">
+    <!-- 汇总指标 -->
+    <view class="card">
+      <view class="card-title">营养摄入汇总（近{{activeDays}}天）</view>
+      <view class="metric-grid">
+        <view class="metric">
+          <view class="metric-value">{{totals.ml}}</view>
+          <view class="metric-label">总摄入(ml)</view>
+        </view>
+        <view class="metric">
+          <view class="metric-value">{{totals.energy.toFixed(1)}}</view>
+          <view class="metric-label">能量(kJ)</view>
+        </view>
+        <view class="metric">
+          <view class="metric-value">{{totals.protein.toFixed(1)}}</view>
+          <view class="metric-label">蛋白质(g)</view>
+        </view>
+        <view class="metric">
+          <view class="metric-value">{{totals.calcium.toFixed(0)}}</view>
+          <view class="metric-label">钙(mg)</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 每日汇总 -->
+    <view class="card" wx:if="{{summaryList.length}}">
+      <view class="card-title">每日摄入</view>
+      <view class="day-item" wx:for="{{summaryList}}" wx:key="intakeDate">
+        <view class="day-left">
+          <view class="day-date">{{item.intakeDate}}</view>
+          <view class="day-meta">{{item.productCount}} 种奶品 · {{item.totalMl}}ml</view>
+        </view>
+        <view class="day-right">
+          <view>能量 {{item.totalEnergy}} kJ</view>
+          <view class="day-sub">蛋白 {{item.totalProtein}}g · 钙 {{item.totalCalcium}}mg</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 摄入明细 -->
+    <view class="card">
+      <view class="card-title">摄入记录</view>
+      <view wx:if="{{records.length}}">
+        <view class="rec-item" wx:for="{{records}}" wx:key="id">
+          <view class="rec-left">
+            <view class="rec-name">{{item.productName}}</view>
+            <view class="rec-meta">{{item.intakeDate}} · {{item.quantity}} 盒</view>
+          </view>
+          <view class="rec-right">
+            <view class="rec-energy">{{item.energy}} kJ</view>
+            <view class="rec-meta">蛋白{{item.protein}}g 钙{{item.calcium}}mg</view>
+          </view>
+        </view>
+        <view wx:if="{{loading}}" class="empty">加载中…</view>
+        <view wx:elif="{{!hasMore}}" class="empty">— 没有更多了 —</view>
+      </view>
+      <view wx:elif="{{loading}}" class="empty">加载中…</view>
+      <view wx:else class="empty">该时段暂无摄入记录</view>
+    </view>
+  </view>
+</view>

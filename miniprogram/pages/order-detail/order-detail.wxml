@@ -1,0 +1,70 @@
+<view class="container" wx:if="{{order}}">
+  <!-- 状态头 -->
+  <view class="status-head status-bg-{{order.status}}">
+    <view class="status-text">{{order.statusText}}</view>
+    <view class="status-no">订单号 {{order.orderNo}}</view>
+  </view>
+
+  <!-- 基本信息 -->
+  <view class="card">
+    <view class="card-title">订单信息</view>
+    <view class="row"><text class="row-label">配送学生</text><text class="row-value">{{order.studentName}}</text></view>
+    <view class="row" wx:if="{{order.className}}"><text class="row-label">班级</text><text class="row-value">{{order.className}}</text></view>
+    <view class="row" wx:if="{{order.packageName}}"><text class="row-label">套餐</text><text class="row-value">{{order.packageName}}</text></view>
+    <view class="row"><text class="row-label">配送周期</text><text class="row-value">{{order.deliveryStartDate}} ~ {{order.deliveryEndDate}}</text></view>
+    <view class="row"><text class="row-label">下单时间</text><text class="row-value">{{order.createTime}}</text></view>
+  </view>
+
+  <!-- 明细 -->
+  <view class="card" wx:if="{{order.items && order.items.length}}">
+    <view class="card-title">订购明细</view>
+    <view class="item" wx:for="{{order.items}}" wx:key="productId">
+      <view class="item-info">
+        <view class="item-name">{{item.productName}}</view>
+        <view class="item-meta">{{item.spec || ''}} · ¥{{item.price}} × {{item.quantity}}</view>
+      </view>
+      <view class="item-subtotal">¥{{item.subtotal}}</view>
+    </view>
+    <view class="amount-row">
+      <text class="row-label">商品总额</text>
+      <text class="row-value">¥{{order.totalAmount}}</text>
+    </view>
+    <view class="amount-row" wx:if="{{order.discountAmount > 0}}">
+      <text class="row-label">优惠（套餐）</text>
+      <text class="row-value text-success">-¥{{order.discountAmount}}</text>
+    </view>
+    <view class="amount-row amount-pay">
+      <text class="row-label">实付金额</text>
+      <text class="row-value text-price">¥{{order.payAmount}}</text>
+    </view>
+  </view>
+
+  <!-- 支付信息 -->
+  <view class="card" wx:if="{{order.payTime}}">
+    <view class="card-title">支付信息</view>
+    <view class="row"><text class="row-label">支付时间</text><text class="row-value">{{order.payTime}}</text></view>
+    <view class="row" wx:if="{{order.transactionId}}"><text class="row-label">交易流水号</text><text class="row-value">{{order.transactionId}}</text></view>
+  </view>
+
+  <!-- 退订信息 -->
+  <view class="card" wx:if="{{order.status === 5}}">
+    <view class="card-title">退订信息</view>
+    <view class="row"><text class="row-label">退订时间</text><text class="row-value">{{order.cancelTime}}</text></view>
+    <view class="row"><text class="row-label">退订原因</text><text class="row-value">{{order.cancelReason || '用户退订'}}</text></view>
+  </view>
+
+  <!-- 备注 -->
+  <view class="card" wx:if="{{order.remark}}">
+    <view class="card-title">备注</view>
+    <view class="desc">{{order.remark}}</view>
+  </view>
+
+  <!-- 操作 -->
+  <view class="actions" wx:if="{{order.status === 1 || order.status === 2}}">
+    <button wx:if="{{order.status === 1}}" class="btn-primary action-btn" bindtap="handlePay" loading="{{paying}}">去支付</button>
+    <button wx:if="{{order.status === 2}}" class="btn-ghost action-btn" bindtap="handleCancel">退订</button>
+  </view>
+</view>
+
+<view wx:elif="{{loading}}" class="empty">加载中…</view>
+<view wx:else class="empty">订单不存在</view>

@@ -1,0 +1,23 @@
+<view class="container">
+  <view class="card" wx:if="{{records.length}}">
+    <view class="rec" wx:for="{{records}}" wx:key="id">
+      <view class="rec-head">
+        <text class="rec-date">{{item.deliveryDate}}</text>
+        <text class="rec-status {{item.signStatus === 1 ? 'signed' : 'unsigned'}}">{{item.signStatusText}}</text>
+      </view>
+      <view class="rec-body">
+        <view class="rec-info">
+          <view class="rec-name">{{item.productName}}</view>
+          <view class="rec-meta">{{item.spec || ''}} · {{item.quantity}} 盒</view>
+          <view class="rec-meta">配送单 {{item.taskNo}}</view>
+        </view>
+        <view wx:if="{{item.signTime}}" class="rec-sign">签收于 {{item.signTime}}</view>
+      </view>
+    </view>
+    <view wx:if="{{loading}}" class="empty">加载中…</view>
+    <view wx:elif="{{!hasMore}}" class="empty">— 没有更多了 —</view>
+  </view>
+
+  <view wx:elif="{{loading}}" class="empty">加载中…</view>
+  <view wx:else class="empty">暂无配送记录</view>
+</view>
