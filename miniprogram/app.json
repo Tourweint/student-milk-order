@@ -2,7 +2,10 @@
   "pages": [
     "pages/login/login",
     "pages/index/index",
-    "pages/mine/mine"
+    "pages/mine/mine",
+    "pages/product/product",
+    "pages/order-create/order-create",
+    "pages/order-list/order-list"
   ],
   "window": {
     "navigationBarTitleText": "学生奶订购",

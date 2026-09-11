@@ -1,0 +1,102 @@
+<view class="container">
+  <!-- 配送孩子 -->
+  <view class="card">
+    <view class="card-title">配送信息</view>
+    <view class="row">
+      <text class="row-label">配送学生</text>
+      <text class="row-value">{{student.studentName || '未绑定'}}</text>
+    </view>
+    <view class="row">
+      <text class="row-label">开始日期</text>
+      <picker mode="date" value="{{startDate}}" bindchange="onStartChange">
+        <view class="picker-value">{{startDate || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="row">
+      <text class="row-label">结束日期</text>
+      <picker mode="date" value="{{endDate}}" bindchange="onEndChange">
+        <view class="picker-value">{{endDate || '请选择'}}</view>
+      </picker>
+    </view>
+    <view class="row">
+      <text class="row-label">配送周期</text>
+      <text class="row-value text-muted">{{startDate && endDate ? startDate + ' ~ ' + endDate : ''}}</text>
+    </view>
+  </view>
+
+  <!-- 套餐模式：套餐信息 -->
+  <view class="card" wx:if="{{mode === 'package' && package}}">
+    <view class="card-title">套餐</view>
+    <view class="row">
+      <text class="row-label">套餐名称</text>
+      <text class="row-value">{{package.packageName}}</text>
+    </view>
+    <view class="row">
+      <text class="row-label">套餐价格</text>
+      <text class="row-value text-price">¥{{package.discountPrice || package.originalPrice}}</text>
+    </view>
+    <view class="pkg-tip">套餐下单需选择配送奶品明细（数量×盒数）</view>
+  </view>
+
+  <!-- 明细 -->
+  <view class="card">
+    <view class="card-title">{{mode === 'package' ? '选择奶品明细' : '订购奶品'}}</view>
+
+    <!-- 奶品直购模式：单奶品 stepper -->
+    <view wx:if="{{mode === 'product' && items.length}}">
+      <view class="line-item">
+        <view class="line-info">
+          <view class="line-name">{{items[0].name}}</view>
+          <view class="line-meta">{{items[0].spec || ''}} · ¥{{items[0].price}}/盒</view>
+        </view>
+        <view class="stepper">
+          <view class="stepper-btn" bindtap="decrease" data-index="0">−</view>
+          <view class="stepper-num">{{items[0].quantity}}</view>
+          <view class="stepper-btn stepper-btn-active" bindtap="increase" data-index="0">＋</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 套餐模式：已选明细 -->
+    <view wx:if="{{mode === 'package' && items.length}}">
+      <view class="line-item" wx:for="{{items}}" wx:key="productId">
+        <view class="line-info">
+          <view class="line-name">{{item.name}}</view>
+          <view class="line-meta">{{item.spec || ''}} · ¥{{item.price}}/盒</view>
+        </view>
+        <view class="stepper">
+          <view class="stepper-btn" bindtap="decrease" data-index="{{index}}">−</view>
+          <view class="stepper-num">{{item.quantity}}</view>
+          <view class="stepper-btn stepper-btn-active" bindtap="increase" data-index="{{index}}">＋</view>
+        </view>
+      </view>
+    </view>
+
+    <!-- 套餐模式：可选奶品 -->
+    <view wx:if="{{mode === 'package'}}">
+      <view class="card-title pkg-subtitle">添加奶品</view>
+      <view class="pkg-option" wx:for="{{productList}}" wx:key="id" bindtap="addProduct" data-id="{{item.id}}">
+        <view class="line-info">
+          <view class="line-name">{{item.productName}}</view>
+          <view class="line-meta">{{item.spec || ''}} · ¥{{item.price}}/盒</view>
+        </view>
+        <view class="add-btn">＋ 添加</view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 备注 -->
+  <view class="card">
+    <view class="card-title">备注（选填）</view>
+    <textarea class="remark-input" placeholder="如：过敏原提醒、配送要求等" value="{{remark}}" bindinput="onRemarkInput" maxlength="200" />
+  </view>
+
+  <!-- 底部提交栏 -->
+  <view class="footer-bar">
+    <view class="footer-price">
+      <text class="text-price">¥{{total}}</text>
+      <text class="text-muted footer-unit">{{mode === 'package' ? '套餐价' : '合计'}}</text>
+    </view>
+    <button class="btn-primary footer-btn" bindtap="handleSubmit" loading="{{submitting}}" disabled="{{submitting}}">提交并支付</button>
+  </view>
+</view>

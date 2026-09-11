@@ -1,0 +1,37 @@
+<view class="container" wx:if="{{product}}">
+  <!-- 奶品主图区（暂无图片资源，用渐变占位） -->
+  <view class="hero">
+    <view class="hero-name">{{product.productName}}</view>
+    <view class="hero-tags">
+      <text class="hero-tag">{{product.categoryName || '奶品'}}</text>
+      <text wx:if="{{product.spec}}" class="hero-tag">{{product.spec}}</text>
+      <text wx:if="{{product.flavor}}" class="hero-tag">{{product.flavor}}</text>
+    </view>
+    <view class="hero-price">
+      <text class="price-symbol">¥</text>
+      <text class="price-num">{{product.price}}</text>
+      <text class="price-unit">/盒</text>
+    </view>
+    <view class="hero-stock">库存 {{product.quantity}} 盒</view>
+  </view>
+
+  <!-- 商品信息 -->
+  <view class="card">
+    <view class="card-title">商品详情</view>
+    <view class="desc">{{product.description || '暂无描述'}}</view>
+  </view>
+
+  <!-- 底部订购栏 -->
+  <view class="footer-bar">
+    <view class="footer-price">
+      <text class="text-price">¥{{product.price}}</text>
+      <text class="text-muted footer-unit">/盒</text>
+    </view>
+    <button class="btn-primary footer-btn" bindtap="goOrder" disabled="{{product.status !== 1}}">
+      {{product.status === 1 ? '立即订购' : '已下架'}}
+    </button>
+  </view>
+</view>
+
+<view wx:elif="{{loading}}" class="empty">加载中…</view>
+<view wx:else class="empty">奶品不存在或已删除</view>

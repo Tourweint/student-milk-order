@@ -19,5 +19,11 @@ public class LoginResponse implements Serializable {
 
     private String realName;
 
+    /** 家长角色：绑定的学生 ID（非家长为 null） */
+    private Long studentId;
+
+    /** 家长角色：绑定的学生姓名（非家长为 null） */
+    private String studentName;
+
     private List<String> roles;
 }

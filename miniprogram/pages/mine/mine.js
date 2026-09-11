@@ -48,10 +48,15 @@ Page({
     return (roles[0] || '').toLowerCase()
   },
 
-  /** 功能入口（后续页面） */
+  /** 功能入口 */
   goPage(e) {
     const name = e.currentTarget.dataset.name
-    wx.showToast({ title: name + ' 开发中', icon: 'none' })
+    const url = e.currentTarget.dataset.url
+    if (url) {
+      wx.navigateTo({ url })
+    } else {
+      wx.showToast({ title: name + ' 开发中', icon: 'none' })
+    }
   },
 
   logout() {

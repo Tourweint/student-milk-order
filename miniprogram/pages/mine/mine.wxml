@@ -13,7 +13,7 @@
 
   <!-- 功能入口 -->
   <view class="card menu">
-    <view class="menu-item" bindtap="goPage" data-name="我的订单">
+    <view class="menu-item" bindtap="goPage" data-name="我的订单" data-url="/pages/order-list/order-list">
       <view class="menu-icon">📋</view>
       <view class="menu-text">我的订单</view>
       <view class="menu-arrow">›</view>

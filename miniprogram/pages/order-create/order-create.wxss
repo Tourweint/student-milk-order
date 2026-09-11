@@ -1,0 +1,160 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14rpx 0;
+  font-size: 28rpx;
+}
+
+.row-label {
+  color: #909399;
+}
+
+.row-value {
+  color: #303133;
+}
+
+.picker-value {
+  color: #409eff;
+}
+
+.pkg-tip {
+  font-size: 24rpx;
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-radius: 8rpx;
+  padding: 12rpx 16rpx;
+  margin-top: 8rpx;
+}
+
+/* 明细行 */
+.line-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.line-item:last-child {
+  border-bottom: none;
+}
+
+.line-info {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16rpx;
+}
+
+.line-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.line-meta {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+/* 数量 stepper */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.stepper-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: #606266;
+  font-size: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepper-btn-active {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.stepper-num {
+  min-width: 64rpx;
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+/* 套餐可选奶品 */
+.pkg-subtitle {
+  margin-top: 24rpx;
+  font-size: 26rpx;
+  color: #606266;
+}
+
+.pkg-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.pkg-option:last-child {
+  border-bottom: none;
+}
+
+.add-btn {
+  font-size: 24rpx;
+  color: #409eff;
+  border: 1rpx solid #409eff;
+  border-radius: 8rpx;
+  padding: 8rpx 20rpx;
+}
+
+/* 备注 */
+.remark-input {
+  width: 100%;
+  min-height: 120rpx;
+  background: #f8fafc;
+  border-radius: 10rpx;
+  padding: 16rpx 20rpx;
+  font-size: 26rpx;
+  box-sizing: border-box;
+}
+
+/* 底部提交栏 */
+.footer-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  border-top: 1rpx solid #ebeef5;
+  padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+.footer-price {
+  font-size: 40rpx;
+}
+
+.footer-unit {
+  font-size: 24rpx;
+  margin-left: 6rpx;
+}
+
+.footer-btn {
+  width: 320rpx;
+}
+
+.container {
+  padding-bottom: 140rpx;
+}

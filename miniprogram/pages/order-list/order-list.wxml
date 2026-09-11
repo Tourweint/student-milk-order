@@ -1,0 +1,47 @@
+<view class="page">
+  <!-- 状态筛选 -->
+  <view class="tabs">
+    <view
+      wx:for="{{tabs}}"
+      wx:key="code"
+      class="tab {{activeStatus === item.code ? 'tab-active' : ''}}"
+      bindtap="switchTab"
+      data-code="{{item.code}}"
+    >{{item.label}}</view>
+  </view>
+
+  <!-- 订单列表 -->
+  <view class="container" wx:if="{{orders.length}}">
+    <view class="card order-card" wx:for="{{orders}}" wx:key="id">
+      <view class="order-head">
+        <text class="order-no">{{item.orderNo}}</text>
+        <text class="order-status status-{{item.status}}">{{item.statusText}}</text>
+      </view>
+      <view class="order-body">
+        <view class="order-main">
+          <view class="order-title">{{item.packageName || '奶品订单'}}</view>
+          <view class="order-meta">
+            <text>{{item.studentName}}</text>
+            <text wx:if="{{item.deliveryStartDate}}"> · {{item.deliveryStartDate}} ~ {{item.deliveryEndDate}}</text>
+          </view>
+          <view wx:if="{{item.cancelReason}}" class="order-cancel">退订原因：{{item.cancelReason}}</view>
+        </view>
+        <view class="order-amount">
+          <text class="text-price">¥{{item.payAmount}}</text>
+        </view>
+      </view>
+      <view class="order-foot">
+        <text class="order-time">下单 {{item.createTime}}</text>
+        <view class="order-actions">
+          <view wx:if="{{item.status === 1}}" class="action-btn action-primary" bindtap="handlePay" data-id="{{item.id}}">去支付</view>
+          <view wx:if="{{item.status === 2}}" class="action-btn" bindtap="handleCancel" data-id="{{item.id}}">退订</view>
+        </view>
+      </view>
+    </view>
+    <view wx:if="{{loading}}" class="empty">加载中…</view>
+    <view wx:elif="{{!hasMore}}" class="empty">— 没有更多了 —</view>
+  </view>
+
+  <view wx:elif="{{loading}}" class="empty">加载中…</view>
+  <view wx:else class="empty">暂无{{tabs[activeStatus].label}}订单</view>
+</view>

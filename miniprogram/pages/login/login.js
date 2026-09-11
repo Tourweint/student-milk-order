@@ -89,7 +89,7 @@ Page({
     wx.showLoading({ title: '搜索中' })
     try {
       const res = await studentApi.searchStudents(studentNo)
-      this.setData({ studentList: res.records || [], searched: true })
+      this.setData({ studentList: res.list || [], searched: true })
     } catch (e) {
       console.error('搜索学生失败', e)
     } finally {

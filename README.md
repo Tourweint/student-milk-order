@@ -153,8 +153,13 @@ miniprogram/
 └── pages/
     ├── login/                     登录绑定页（wx.login → wx-login → wx-bind）
     ├── index/                     首页（套餐 + 奶品列表）
+    ├── product/                   奶品详情（立即订购）
+    ├── order-create/              下单页（奶品直购 / 套餐订购 + 配送日期 + 模拟支付）
+    ├── order-list/                我的订单（状态筛选、去支付、退订）
     └── mine/                      我的（用户信息、功能入口、退出）
 ```
+
+> 说明：后端统一分页结构字段为 `list`（`PageResult.total/pageNum/pageSize/list`），前端分页读取一律用 `res.list`。
 
 ### 开发者工具导入
 

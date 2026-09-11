@@ -150,6 +150,14 @@ public class AuthServiceImpl implements AuthService {
         response.setUsername(user.getUsername());
         response.setRealName(user.getRealName());
         response.setRoles(roles);
+        // 家长角色：回填绑定的学生信息（下单页/我的页展示用）
+        if (roles.contains(RoleType.PARENT.getCode()) && user.getStudentId() != null) {
+            response.setStudentId(user.getStudentId());
+            Student student = studentMapper.selectById(user.getStudentId());
+            if (student != null) {
+                response.setStudentName(student.getStudentName());
+            }
+        }
         return response;
     }
 

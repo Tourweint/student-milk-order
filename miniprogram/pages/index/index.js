@@ -31,7 +31,7 @@ Page({
       this.setData({
         user: auth.getUser(),
         packages: pkgRes || [],
-        products: (prodRes && prodRes.records) || []
+        products: (prodRes && prodRes.list) || []
       })
     } catch (e) {
       console.error('加载首页数据失败', e)
@@ -42,11 +42,11 @@ Page({
 
   goProduct(e) {
     const id = e.currentTarget.dataset.id
-    wx.showToast({ title: '奶品详情页开发中', icon: 'none' })
+    wx.navigateTo({ url: '/pages/product/product?id=' + id })
   },
 
   goPackage(e) {
     const id = e.currentTarget.dataset.id
-    wx.showToast({ title: '套餐详情页开发中', icon: 'none' })
+    wx.navigateTo({ url: '/pages/order-create/order-create?mode=package&packageId=' + id })
   }
 })
