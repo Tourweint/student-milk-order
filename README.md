@@ -133,10 +133,12 @@ npm run dev
 
 ## 小程序接入说明
 
-微信小程序端后续开发，直接调用后端 RESTful API：
+微信小程序端直接调用后端 RESTful API：
 - API 基地址：`/api`
 - 认证：JWT Token，请求头 `Authorization: Bearer {token}`
-- 家长端接口已在后端预留，详见 [接口文档](docs/基线文档/接口文档.md)
+- 登录：支持账号密码登录（`/auth/login`）与微信授权登录（`/auth/wx-login` → 未绑定走 `/auth/wx-bind`）
+- 数据权限：家长角色自动限定为自己绑定的学生，班主任限定本班，越权返回 403
+- 接口与微信登录流程详见 [接口文档](docs/基线文档/接口文档.md)
 
 ## 开发规范
 

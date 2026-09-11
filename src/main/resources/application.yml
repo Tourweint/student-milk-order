@@ -36,6 +36,12 @@ jwt:
   header: Authorization
   prefix: "Bearer "
 
+# 微信小程序配置（登录用 code2session）
+wechat:
+  appid: ""            # 小程序 AppID（本地联调可留空）
+  secret: ""           # 小程序 AppSecret（禁止提交真实值）
+  mock-enabled: true   # 未配置真实 appid/secret 时按 code 生成模拟 openid，便于本地联调；上线前关闭并配置真实值
+
 # 日志
 logging:
   level:

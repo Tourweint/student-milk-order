@@ -14,6 +14,11 @@ public interface SysUserService extends IService<SysUser> {
     SysUser getByUsername(String username);
 
     /**
+     * 根据微信 openid 查询用户（未绑定返回 null）
+     */
+    SysUser getByOpenid(String openid);
+
+    /**
      * 判断用户名是否已存在
      */
     boolean isUsernameExists(String username, Long excludeId);

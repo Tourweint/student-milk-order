@@ -30,6 +30,8 @@ import com.milk.order.module.order.mapper.OrderInfoMapper;
 import com.milk.order.module.order.mapper.OrderItemMapper;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.ProductMapper;
+import com.milk.order.module.user.dto.DataScope;
+import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -59,6 +61,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final ProductMapper productMapper;
     private final NutritionInfoMapper nutritionInfoMapper;
     private final NutritionIntakeMapper nutritionIntakeMapper;
+    private final DataScopeResolver dataScopeResolver;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Pattern ML_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*ml", Pattern.CASE_INSENSITIVE);
@@ -237,6 +240,17 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     @Override
     public IPage<DeliveryRecordVO> pageRecords(Long pageNum, Long pageSize, String deliveryDate, Long classId,
                                                 Long studentId, Integer signStatus) {
+        // 数据权限：家长仅能查看自己绑定学生的配送记录，班主任仅能查看本班
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() != null) {
+            studentId = scope.getStudentId();
+        } else if (scope.getClassId() != null) {
+            classId = scope.getClassId();
+        } else if (scope.isScoped()) {
+            // 家长角色但未绑定学生
+            throw new BusinessException("请先绑定学生信息");
+        }
+
         Page<DeliveryRecord> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));

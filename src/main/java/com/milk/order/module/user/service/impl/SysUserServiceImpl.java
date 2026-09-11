@@ -34,6 +34,13 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
+    public SysUser getByOpenid(String openid) {
+        return lambdaQuery()
+                .eq(SysUser::getOpenid, openid)
+                .one();
+    }
+
+    @Override
     public boolean isUsernameExists(String username, Long excludeId) {
         return lambdaQuery()
                 .eq(SysUser::getUsername, username)

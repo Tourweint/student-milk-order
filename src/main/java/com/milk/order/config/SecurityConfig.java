@@ -44,7 +44,8 @@ public class SecurityConfig {
                 .and()
                 .authorizeRequests()
                 // 公开接口
-                .antMatchers("/api/auth/login", "/api/auth/register").permitAll()
+                .antMatchers("/api/auth/login", "/api/auth/register",
+                        "/api/auth/wx-login", "/api/auth/wx-bind").permitAll()
                 .antMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 // 其他接口需要认证
                 .anyRequest().authenticated()

@@ -27,8 +27,10 @@ import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.MealPackageMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.product.service.InventoryService;
+import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.entity.SysUser;
 import com.milk.order.module.user.mapper.SysUserMapper;
+import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +58,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
     private final InventoryService inventoryService;
+    private final DataScopeResolver dataScopeResolver;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
@@ -64,6 +67,15 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Override
     public IPage<OrderVO> pageOrders(Long pageNum, Long pageSize, Long classId, Long studentId,
                                       Integer status, String startDate, String endDate) {
+        // 数据权限：家长仅看自己绑定的学生，班主任仅看本班，管理员不限
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getClassId() != null) {
+            classId = scope.getClassId();
+        }
+        if (scope.getStudentId() != null) {
+            studentId = scope.getStudentId();
+        }
+
         Page<OrderInfo> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
@@ -90,10 +102,8 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
 
     @Override
     public OrderVO getOrderDetail(Long id) {
-        OrderInfo order = getById(id);
-        if (order == null) {
-            throw new BusinessException("订单不存在");
-        }
+        OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
         List<OrderVO> list = convert(Collections.singletonList(order));
         OrderVO vo = list.get(0);
         vo.setItems(getOrderItems(id));
@@ -102,6 +112,11 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
 
     @Override
     public List<OrderItem> getOrderItems(Long orderId) {
+        OrderInfo order = getById(orderId);
+        if (order != null) {
+            // 家长/班主任按数据范围校验归属（内部流程如续订无登录上下文时自动跳过）
+            checkOrderAccess(order);
+        }
         return orderItemMapper.selectList(
                 new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, orderId));
     }
@@ -110,6 +125,8 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
 
     @Override
     public Long createOrder(CreateOrderRequest request) {
+        // 数据权限：家长仅能为自己绑定的学生下单，班主任仅能为本班学生下单
+        checkCreateOrderScope(request);
         return doCreateOrder(request, currentUserId());
     }
 
@@ -261,6 +278,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Transactional(rollbackFor = Exception.class)
     public void payOrder(Long id) {
         OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
         if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
             throw new BusinessException("当前订单状态不允许支付");
         }
@@ -297,6 +315,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Transactional(rollbackFor = Exception.class)
     public void cancelOrder(Long id, String reason) {
         OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
         Integer status = order.getStatus();
         if (!OrderStatus.PENDING_PAYMENT.getCode().equals(status)
                 && !OrderStatus.PAID.getCode().equals(status)) {
@@ -320,6 +339,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Override
     public void startDelivery(Long id) {
         OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
         if (!OrderStatus.PAID.getCode().equals(order.getStatus())) {
             throw new BusinessException("仅已支付订单可开始配送");
         }
@@ -330,6 +350,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Override
     public void completeOrder(Long id) {
         OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
         if (!OrderStatus.DELIVERING.getCode().equals(order.getStatus())) {
             throw new BusinessException("仅配送中订单可完成");
         }
@@ -345,6 +366,49 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             throw new BusinessException("订单不存在");
         }
         return order;
+    }
+
+    /**
+     * 校验当前用户是否有权访问该订单：
+     * 家长仅能访问自己绑定学生的订单，班主任仅能访问本班订单；
+     * 管理员与无登录上下文的内部流程（定时续订等）不限制。
+     */
+    private void checkOrderAccess(OrderInfo order) {
+        DataScope scope = dataScopeResolver.resolveQuietly();
+        if (scope.isAll()) {
+            return;
+        }
+        if (scope.getStudentId() != null) {
+            if (!scope.getStudentId().equals(order.getStudentId())) {
+                throw new BusinessException(403, "无权访问该订单");
+            }
+        } else if (scope.getClassId() != null) {
+            if (!scope.getClassId().equals(order.getClassId())) {
+                throw new BusinessException(403, "无权访问该订单");
+            }
+        }
+    }
+
+    /**
+     * 校验下单数据范围：家长仅能为自己绑定的学生下单，班主任仅能为本班学生下单
+     */
+    private void checkCreateOrderScope(CreateOrderRequest request) {
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.isAll()) {
+            return;
+        }
+        if (scope.getStudentId() != null) {
+            if (!scope.getStudentId().equals(request.getStudentId())) {
+                throw new BusinessException(403, "只能为自己的孩子下单");
+            }
+            return;
+        }
+        if (scope.getClassId() != null) {
+            Student student = studentMapper.selectById(request.getStudentId());
+            if (student == null || !scope.getClassId().equals(student.getClassId())) {
+                throw new BusinessException(403, "只能为本班学生下单");
+            }
+        }
     }
 
     private Long currentUserId() {

@@ -23,11 +23,13 @@ CREATE TABLE IF NOT EXISTS sys_user (
     status TINYINT DEFAULT 1 COMMENT '账号状态：0-禁用，1-正常',
     student_id BIGINT COMMENT '关联学生ID（家长账号）',
     class_id BIGINT COMMENT '关联班级ID（班主任账号）',
+    openid VARCHAR(64) COMMENT '微信openid（家长微信授权登录绑定）',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除：0-未删除，1-已删除',
     UNIQUE KEY uk_username (username),
+    UNIQUE KEY uk_openid (openid),
     KEY idx_student_id (student_id),
     KEY idx_class_id (class_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';

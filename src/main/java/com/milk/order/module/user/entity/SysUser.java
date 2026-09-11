@@ -40,6 +40,9 @@ public class SysUser extends BaseEntity {
     /** 关联班级 ID（班主任账号时关联） */
     private Long classId;
 
+    /** 微信 openid（家长微信授权登录绑定） */
+    private String openid;
+
     /** 备注 */
     private String remark;
 }

@@ -20,6 +20,8 @@ import com.milk.order.module.nutrition.vo.NutritionIntakeVO;
 import com.milk.order.module.nutrition.vo.NutritionSummaryVO;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.ProductMapper;
+import com.milk.order.module.user.dto.DataScope;
+import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -37,6 +39,7 @@ public class NutritionInfoServiceImpl extends ServiceImpl<NutritionInfoMapper, N
     private final NutritionIntakeMapper nutritionIntakeMapper;
     private final StudentMapper studentMapper;
     private final ProductMapper productMapper;
+    private final DataScopeResolver dataScopeResolver;
 
     // ==================== 营养成分管理 ====================
 
@@ -106,6 +109,9 @@ public class NutritionInfoServiceImpl extends ServiceImpl<NutritionInfoMapper, N
     @Override
     public IPage<NutritionIntakeVO> pageIntakes(Long pageNum, Long pageSize, Long studentId,
                                                   String startDate, String endDate) {
+        // 数据权限：家长仅能查询自己绑定学生的营养摄入
+        studentId = applyParentScope(studentId);
+
         Page<NutritionIntake> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
@@ -129,6 +135,9 @@ public class NutritionInfoServiceImpl extends ServiceImpl<NutritionInfoMapper, N
 
     @Override
     public List<NutritionSummaryVO> summaryByStudent(Long studentId, String startDate, String endDate) {
+        // 数据权限：家长仅能汇总自己绑定学生的营养摄入
+        studentId = applyParentScope(studentId);
+
         LambdaQueryWrapper<NutritionIntake> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(NutritionIntake::getStudentId, studentId);
         if (StringUtils.hasText(startDate)) {
@@ -163,6 +172,21 @@ public class NutritionInfoServiceImpl extends ServiceImpl<NutritionInfoMapper, N
     }
 
     // ==================== 内部工具 ====================
+
+    /**
+     * 数据权限：家长角色强制使用自己绑定的学生 ID；家长未绑定学生时禁止查询
+     */
+    private Long applyParentScope(Long studentId) {
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() != null) {
+            return scope.getStudentId();
+        }
+        if (scope.isScoped() && scope.getClassId() == null) {
+            // 家长角色但未绑定学生
+            throw new BusinessException("请先绑定学生信息");
+        }
+        return studentId;
+    }
 
     private BigDecimal sum(List<NutritionIntake> items, Function<NutritionIntake, BigDecimal> getter) {
         return items.stream()

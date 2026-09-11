@@ -19,6 +19,8 @@ import com.milk.order.module.subscription.entity.SubscriptionPlan;
 import com.milk.order.module.subscription.mapper.SubscriptionPlanMapper;
 import com.milk.order.module.subscription.service.SubscriptionPlanService;
 import com.milk.order.module.subscription.vo.SubscriptionPlanVO;
+import com.milk.order.module.user.dto.DataScope;
+import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,15 +45,25 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     private final MealPackageMapper mealPackageMapper;
     private final OrderInfoMapper orderInfoMapper;
     private final OrderInfoService orderInfoService;
+    private final DataScopeResolver dataScopeResolver;
 
     // ==================== 查询 ====================
 
     @Override
     public IPage<SubscriptionPlanVO> pagePlans(Long pageNum, Long pageSize, Integer status) {
+        // 数据权限：家长仅能查看自己学生的续订计划
+        DataScope scope = dataScopeResolver.resolve();
+        LambdaQueryWrapper<SubscriptionPlan> wrapper = new LambdaQueryWrapper<>();
+        if (scope.getStudentId() != null) {
+            wrapper.eq(SubscriptionPlan::getStudentId, scope.getStudentId());
+        } else if (scope.isScoped() && scope.getClassId() == null) {
+            // 家长角色但未绑定学生
+            throw new BusinessException("请先绑定学生信息");
+        }
+
         Page<SubscriptionPlan> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
-        LambdaQueryWrapper<SubscriptionPlan> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(status != null, SubscriptionPlan::getStatus, status)
                 .orderByDesc(SubscriptionPlan::getId);
         IPage<SubscriptionPlan> planPage = page(page, wrapper);
@@ -64,10 +76,8 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
 
     @Override
     public SubscriptionPlanVO getPlanDetail(Long id) {
-        SubscriptionPlan plan = getById(id);
-        if (plan == null) {
-            throw new BusinessException("续订计划不存在");
-        }
+        SubscriptionPlan plan = getPlan(id);
+        checkPlanAccess(plan);
         return convert(Collections.singletonList(plan)).get(0);
     }
 
@@ -76,6 +86,16 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createPlan(CreateSubscriptionRequest request) {
+        // 数据权限：家长仅能为自己绑定的学生开启续订
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() != null) {
+            if (!scope.getStudentId().equals(request.getStudentId())) {
+                throw new BusinessException(403, "只能为自己的孩子开启续订");
+            }
+        } else if (scope.isScoped() && scope.getClassId() == null) {
+            throw new BusinessException("请先绑定学生信息");
+        }
+
         // 校验学生
         Student student = studentMapper.selectById(request.getStudentId());
         if (student == null) {
@@ -128,10 +148,8 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
         if (plan.getId() == null) {
             throw new BusinessException("计划ID不能为空");
         }
-        SubscriptionPlan existing = getById(plan.getId());
-        if (existing == null) {
-            throw new BusinessException("续订计划不存在");
-        }
+        SubscriptionPlan existing = getPlan(plan.getId());
+        checkPlanAccess(existing);
         // 只允许修改备注和周期
         existing.setRemark(plan.getRemark());
         if (plan.getCycleType() != null) {
@@ -142,10 +160,8 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
 
     @Override
     public void closePlan(Long id) {
-        SubscriptionPlan plan = getById(id);
-        if (plan == null) {
-            throw new BusinessException("续订计划不存在");
-        }
+        SubscriptionPlan plan = getPlan(id);
+        checkPlanAccess(plan);
         plan.setStatus(0);
         updateById(plan);
     }
@@ -155,10 +171,8 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long triggerRenewal(Long id) {
-        SubscriptionPlan plan = getById(id);
-        if (plan == null) {
-            throw new BusinessException("续订计划不存在");
-        }
+        SubscriptionPlan plan = getPlan(id);
+        checkPlanAccess(plan);
         if (plan.getStatus() != 1) {
             throw new BusinessException("仅已开启的计划可续订");
         }
@@ -200,6 +214,28 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     }
 
     // ==================== 内部工具 ====================
+
+    private SubscriptionPlan getPlan(Long id) {
+        SubscriptionPlan plan = getById(id);
+        if (plan == null) {
+            throw new BusinessException("续订计划不存在");
+        }
+        return plan;
+    }
+
+    /**
+     * 校验当前用户是否有权访问该续订计划：
+     * 家长仅能操作自己学生的计划；管理员与无登录上下文的定时续订任务不限制。
+     */
+    private void checkPlanAccess(SubscriptionPlan plan) {
+        DataScope scope = dataScopeResolver.resolveQuietly();
+        if (scope.isAll()) {
+            return;
+        }
+        if (scope.getStudentId() != null && !scope.getStudentId().equals(plan.getStudentId())) {
+            throw new BusinessException(403, "无权操作该续订计划");
+        }
+    }
 
     private List<SubscriptionPlanVO> convert(List<SubscriptionPlan> plans) {
         if (plans.isEmpty()) {
