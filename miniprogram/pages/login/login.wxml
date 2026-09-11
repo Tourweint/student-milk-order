@@ -1,0 +1,58 @@
+<view class="login-page">
+  <!-- 品牌区 -->
+  <view class="brand">
+    <view class="brand-icon">🥛</view>
+    <view class="brand-title">学生奶订购</view>
+    <view class="brand-sub">Student Milk Order</view>
+  </view>
+
+  <!-- 未绑定：微信一键登录 -->
+  <view wx:if="{{!showBind}}" class="card login-card">
+    <button class="btn-primary" bindtap="handleWxLogin" loading="{{loading}}" disabled="{{loading}}">
+      微信一键登录
+    </button>
+    <view class="tip">首次登录需绑定学生信息，方便为孩子订奶</view>
+  </view>
+
+  <!-- 未绑定：填写家长与孩子信息 -->
+  <view wx:else class="card login-card">
+    <view class="card-title">绑定家长信息</view>
+
+    <view class="form-item">
+      <view class="form-label">家长姓名</view>
+      <input class="form-input" placeholder="请输入家长姓名" value="{{form.realName}}" bindinput="onRealNameInput" />
+    </view>
+
+    <view class="form-item">
+      <view class="form-label">手机号（选填）</view>
+      <input class="form-input" placeholder="请输入手机号" type="number" maxlength="11" value="{{form.phone}}" bindinput="onPhoneInput" />
+    </view>
+
+    <view class="form-item">
+      <view class="form-label">学生学号</view>
+      <view class="search-row">
+        <input class="form-input search-input" placeholder="输入学号搜索孩子" value="{{form.studentNo}}" bindinput="onStudentNoInput" bindconfirm="searchStudent" confirm-type="search" />
+        <view class="search-btn" bindtap="searchStudent">搜索</view>
+      </view>
+    </view>
+
+    <view wx:if="{{searched && studentList.length === 0}}" class="empty">未找到该学号的学生</view>
+
+    <view wx:if="{{studentList.length}}" class="student-list">
+      <view
+        wx:for="{{studentList}}"
+        wx:key="id"
+        class="student-item {{selectedStudent && selectedStudent.id === item.id ? 'selected' : ''}}"
+        bindtap="selectStudent"
+        data-id="{{item.id}}"
+      >
+        <view class="student-name">{{item.studentName}}</view>
+        <view class="text-muted">{{item.studentNo}} · {{item.className}}</view>
+      </view>
+    </view>
+
+    <button class="btn-primary bind-btn" bindtap="handleBind" loading="{{binding}}" disabled="{{binding}}">
+      确认绑定并登录
+    </button>
+  </view>
+</view>

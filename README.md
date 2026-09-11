@@ -140,6 +140,29 @@ npm run dev
 - 数据权限：家长角色自动限定为自己绑定的学生，班主任限定本班，越权返回 403
 - 接口与微信登录流程详见 [接口文档](docs/基线文档/接口文档.md)
 
+### 小程序目录（miniprogram/）
+
+```
+miniprogram/
+├── app.js / app.json / app.wxss   全局入口与配置（tabBar：首页/我的）
+├── config/index.js                全局配置：BASE_URL、USE_MOCK_WX
+├── utils/
+│   ├── request.js                 wx.request 封装（token 注入、401 处理、query 拼接）
+│   └── auth.js                    登录态管理（token/用户信息存取）
+├── api/                           接口模块：auth/product/order/nutrition/delivery/subscription/student
+└── pages/
+    ├── login/                     登录绑定页（wx.login → wx-login → wx-bind）
+    ├── index/                     首页（套餐 + 奶品列表）
+    └── mine/                      我的（用户信息、功能入口、退出）
+```
+
+### 开发者工具导入
+
+1. 微信开发者工具 → 导入项目 → 选择目录 `miniprogram/`
+2. AppID：使用测试号或注册的小程序 AppID（本地联调不校验域名）
+3. 后端启动后（`mvn spring-boot:run`），首页即可请求本机 `http://localhost:8090/api`
+4. 本地联调默认走微信 mock 模式（`config/index.js` 的 `USE_MOCK_WX=true`，后端 `wechat.mock-enabled=true`），无需真实小程序凭据
+
 ## 开发规范
 
 本项目遵循文档驱动开发规范，详见 [文档驱动开发规范](docs/研发规范/文档驱动开发规范.md)。

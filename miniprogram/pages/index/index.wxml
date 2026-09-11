@@ -1,0 +1,44 @@
+<view class="container">
+  <!-- 欢迎区 -->
+  <view class="welcome">
+    <view class="welcome-greet">你好，{{user.realName || user.username || '家长'}}</view>
+    <view class="welcome-sub">为孩子挑选健康营养的学生奶</view>
+  </view>
+
+  <!-- 套餐区 -->
+  <view class="card" wx:if="{{packages.length}}">
+    <view class="card-title">优惠套餐</view>
+    <scroll-view scroll-x class="pkg-scroll" enhanced show-scrollbar="{{false}}">
+      <view class="pkg-item" wx:for="{{packages}}" wx:key="id" bindtap="goPackage" data-id="{{item.id}}">
+        <view class="pkg-name">{{item.packageName}}</view>
+        <view class="pkg-desc">{{item.description || '奶品组合优惠套餐'}}</view>
+        <view class="pkg-price">
+          <text class="text-price">¥{{item.discountPrice || item.originalPrice}}</text>
+          <text wx:if="{{item.originalPrice}}" class="pkg-origin">¥{{item.originalPrice}}</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- 奶品列表 -->
+  <view class="card">
+    <view class="card-title">奶品选购</view>
+    <view wx:if="{{loading}}" class="empty">加载中…</view>
+    <view wx:elif="{{products.length === 0}}" class="empty">暂无上架奶品</view>
+    <view class="product-item" wx:for="{{products}}" wx:key="id" bindtap="goProduct" data-id="{{item.id}}">
+      <view class="product-info">
+        <view class="product-name">{{item.productName}}</view>
+        <view class="product-meta">
+          <text>{{item.spec}}</text>
+          <text wx:if="{{item.flavor}}"> · {{item.flavor}}</text>
+          <text> · {{item.categoryName || '奶品'}}</text>
+        </view>
+        <view class="product-stock">库存 {{item.quantity}} 盒</view>
+      </view>
+      <view class="product-right">
+        <view class="text-price product-price">¥{{item.price}}</view>
+        <view class="product-buy">订奶</view>
+      </view>
+    </view>
+  </view>
+</view>

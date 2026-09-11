@@ -26,3 +26,6 @@ logs/
 application-local.yml
 *.env
 .env.*
+
+# 微信开发者工具私有配置
+miniprogram/project.private.config.json

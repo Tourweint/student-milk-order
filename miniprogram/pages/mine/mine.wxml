@@ -1,0 +1,40 @@
+<view class="container">
+  <!-- 用户卡片 -->
+  <view class="user-card">
+    <view class="avatar">{{(user.realName || user.username || '家')[0]}}</view>
+    <view class="user-info">
+      <view class="user-name">{{user.realName || user.username || '未登录'}}</view>
+      <view class="user-meta">
+        <text class="role-tag">{{roleText || '—'}}</text>
+        <text class="user-username">{{user.username}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 功能入口 -->
+  <view class="card menu">
+    <view class="menu-item" bindtap="goPage" data-name="我的订单">
+      <view class="menu-icon">📋</view>
+      <view class="menu-text">我的订单</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goPage" data-name="营养统计">
+      <view class="menu-icon">🍎</view>
+      <view class="menu-text">营养统计</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goPage" data-name="配送记录">
+      <view class="menu-icon">🚚</view>
+      <view class="menu-text">配送记录</view>
+      <view class="menu-arrow">›</view>
+    </view>
+    <view class="menu-item" bindtap="goPage" data-name="自动续订">
+      <view class="menu-icon">🔁</view>
+      <view class="menu-text">自动续订</view>
+      <view class="menu-arrow">›</view>
+    </view>
+  </view>
+
+  <!-- 退出登录 -->
+  <button class="btn-primary logout-btn" bindtap="logout">退出登录</button>
+</view>
