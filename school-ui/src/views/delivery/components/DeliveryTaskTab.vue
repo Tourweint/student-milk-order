@@ -1,0 +1,200 @@
+<template>
+  <div class="task-tab">
+    <!-- 筛选 + 生成 -->
+    <div class="toolbar">
+      <el-date-picker v-model="queryDate" type="date" placeholder="配送日期" value-format="YYYY-MM-DD" class="filter-item" />
+      <el-select v-model="query.classId" placeholder="全部班级" clearable filterable class="filter-item">
+        <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
+      </el-select>
+      <el-select v-model="query.status" placeholder="全部状态" clearable class="filter-item">
+        <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+      </el-select>
+      <el-button type="primary" @click="fetchList">查询</el-button>
+      <el-button @click="handleReset">重置</el-button>
+      <div class="spacer" />
+      <el-button type="success" :icon="Refresh" @click="openGenerate">生成配送任务</el-button>
+    </div>
+
+    <!-- 表格 -->
+    <el-table v-loading="loading" :data="tableData" stripe>
+      <el-table-column prop="taskNo" label="任务编号" min-width="180" />
+      <el-table-column prop="deliveryDate" label="配送日期" width="120" />
+      <el-table-column prop="className" label="班级" width="110" />
+      <el-table-column prop="studentName" label="学生" width="90" />
+      <el-table-column prop="productName" label="奶品" min-width="110" />
+      <el-table-column prop="spec" label="规格" width="90" />
+      <el-table-column prop="quantity" label="数量" width="70" />
+      <el-table-column label="状态" width="100">
+        <template #default="{ row }">
+          <el-tag :type="taskStatusTag(row.status)" size="small">{{ taskStatusText(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button v-if="row.status === 1" link type="primary" @click="handleStart(row)">开始配送</el-button>
+          <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleCancel(row)">取消</el-button>
+          <el-button link type="info" @click="viewRecords(row)">查看记录</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <div class="pagination">
+      <el-pagination
+        v-model:current-page="query.pageNum"
+        v-model:page-size="query.pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next"
+        @size-change="fetchList"
+        @current-change="fetchList"
+      />
+    </div>
+
+    <!-- 生成任务对话框 -->
+    <el-dialog v-model="generateVisible" title="生成配送任务" width="420px">
+      <el-form label-width="80px">
+        <el-form-item label="配送日期" required>
+          <el-date-picker v-model="generateDate" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" class="full-width" />
+        </el-form-item>
+        <el-form-item label="班级">
+          <el-select v-model="generateClassId" placeholder="不选则全部班级" clearable class="full-width">
+            <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="generateVisible = false">取消</el-button>
+        <el-button type="primary" :loading="generating" @click="handleGenerate">生成</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted } from 'vue'
+import { Refresh } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  getDeliveryTaskList, generateDeliveryTasks, startDeliveryTask, cancelDeliveryTask
+} from '@/api/delivery'
+import { getAllClass } from '@/api/clazz'
+
+const emit = defineEmits<{ (e: 'view-records', task: any): void }>()
+
+const loading = ref(false)
+const tableData = ref<any[]>([])
+const total = ref(0)
+const classList = ref<any[]>([])
+const queryDate = ref('')
+const generateVisible = ref(false)
+const generateDate = ref('')
+const generateClassId = ref<number | undefined>(undefined)
+const generating = ref(false)
+
+const query = reactive({
+  pageNum: 1, pageSize: 10,
+  classId: undefined as number | undefined,
+  status: undefined as number | undefined
+})
+
+const statusOptions = [
+  { value: 1, label: '待配送' },
+  { value: 2, label: '配送中' },
+  { value: 3, label: '已完成' },
+  { value: 4, label: '已取消' }
+]
+const taskStatusText = (s: number) => statusOptions.find((x) => x.value === s)?.label ?? '未知'
+const taskStatusTag = (s: number): any => {
+  const map: Record<number, string> = { 1: 'warning', 2: 'primary', 3: 'success', 4: 'danger' }
+  return map[s] ?? 'info'
+}
+const classLabel = (c: any) => c.gradeName ? `${c.gradeName} · ${c.className}` : c.className
+
+async function fetchList() {
+  loading.value = true
+  try {
+    const res: any = await getDeliveryTaskList({
+      ...query,
+      deliveryDate: queryDate.value || undefined
+    })
+    tableData.value = res.data.list
+    total.value = Number(res.data.total)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function fetchClasses() {
+  const res: any = await getAllClass()
+  classList.value = res.data
+}
+
+function handleReset() {
+  queryDate.value = ''
+  query.classId = undefined
+  query.status = undefined
+  query.pageNum = 1
+  fetchList()
+}
+
+function openGenerate() {
+  generateDate.value = ''
+  generateClassId.value = undefined
+  generateVisible.value = true
+}
+
+async function handleGenerate() {
+  if (!generateDate.value) {
+    ElMessage.warning('请选择配送日期')
+    return
+  }
+  generating.value = true
+  try {
+    const res: any = await generateDeliveryTasks(generateDate.value, generateClassId.value)
+    ElMessage.success(`已生成 ${res.data} 条配送任务`)
+    generateVisible.value = false
+    fetchList()
+  } finally {
+    generating.value = false
+  }
+}
+
+async function handleStart(row: any) {
+  await startDeliveryTask(row.id)
+  ElMessage.success('已开始配送')
+  fetchList()
+}
+
+async function handleCancel(row: any) {
+  const { value: reason } = await ElMessageBox.prompt('请输入取消原因（可选）', '取消确认', {
+    type: 'warning', inputPlaceholder: '可留空'
+  }).catch(() => ({ value: undefined as any }))
+  if (reason === undefined) return
+  await cancelDeliveryTask(row.id, reason || undefined)
+  ElMessage.success('已取消')
+  fetchList()
+}
+
+function viewRecords(row: any) {
+  emit('view-records', row)
+}
+
+onMounted(() => {
+  fetchClasses()
+  fetchList()
+})
+</script>
+
+<style scoped lang="scss">
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  .filter-item { width: 160px; }
+  .spacer { flex: 1; }
+}
+.pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
+.full-width { width: 100%; }
+</style>

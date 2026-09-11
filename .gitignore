@@ -1,0 +1,28 @@
+# Java / Maven
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Node / Vue 前端
+node_modules/
+school-ui/dist/
+school-ui/.vite/
+
+# 日志与临时文件
+*.log
+logs/
+*.tmp
+*.bak
+
+# 环境与凭据（禁止提交真实密钥）
+application-local.yml
+*.env
+.env.*
