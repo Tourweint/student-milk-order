@@ -3,22 +3,24 @@ package com.milk.order.module.product.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
-import com.milk.order.module.product.dto.InventoryChangeRequest;
-import com.milk.order.module.product.dto.InventoryThresholdRequest;
+import com.milk.order.module.product.dto.DailyQuotaRequest;
+import com.milk.order.module.product.dto.PackageSaveRequest;
+import com.milk.order.module.product.entity.DailyQuota;
 import com.milk.order.module.product.entity.MealPackage;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.entity.ProductCategory;
-import com.milk.order.module.product.service.InventoryService;
+import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.service.MealPackageService;
 import com.milk.order.module.product.service.ProductCategoryService;
 import com.milk.order.module.product.service.ProductService;
-import com.milk.order.module.product.vo.InventoryRecordVO;
-import com.milk.order.module.product.vo.InventoryVO;
+import com.milk.order.module.product.vo.MealPackageDetailVO;
 import com.milk.order.module.product.vo.ProductVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -27,13 +29,11 @@ import java.util.List;
  * 接口清单：
  * 品类：GET/POST/PUT/DELETE /api/product/category[...]
  * 奶品：GET /api/product/list、GET/POST/PUT/DELETE /api/product[...]
- * 套餐：GET/POST/PUT/DELETE /api/product/package[...]
- * 库存与流水：
- * - GET  /api/product/inventory/list          库存分页（带奶品信息）
- * - GET  /api/product/inventory/warning       库存预警列表
- * - POST /api/product/inventory/change        库存变动（入库/出库/盘盈/盘亏，写流水）
- * - PUT  /api/product/inventory/threshold     设置预警阈值/库位
- * - GET  /api/product/inventory/record/list   库存流水分页（统计数据源）
+ * 套餐：GET/POST/PUT/DELETE /api/product/package[...]（仅学期套餐）
+ * 每日机动配额（单日零散订购用，无传统仓库库存）：
+ * - GET /api/product/quota/list          配额列表（日期区间）
+ * - GET /api/product/quota/remaining     某日剩余机动盒数
+ * - PUT /api/product/quota               设置某日机动配额
  */
 @RestController
 @RequestMapping("/api/product")
@@ -43,7 +43,7 @@ public class ProductController {
     private final ProductCategoryService categoryService;
     private final ProductService productService;
     private final MealPackageService packageService;
-    private final InventoryService inventoryService;
+    private final DailyQuotaService dailyQuotaService;
 
     // ==================== 品类 ====================
 
@@ -83,8 +83,8 @@ public class ProductController {
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<Product> getProductById(@PathVariable Long id) {
-        return ApiResponse.success(productService.getById(id));
+    public ApiResponse<ProductVO> getProductById(@PathVariable Long id) {
+        return ApiResponse.success(productService.getProductDetail(id));
     }
 
     @PostMapping
@@ -113,19 +113,19 @@ public class ProductController {
     }
 
     @GetMapping("/package/{id}")
-    public ApiResponse<MealPackage> getPackageById(@PathVariable Long id) {
-        return ApiResponse.success(packageService.getById(id));
+    public ApiResponse<MealPackageDetailVO> getPackageById(@PathVariable Long id) {
+        return ApiResponse.success(packageService.getPackageDetail(id));
     }
 
     @PostMapping("/package")
-    public ApiResponse<Void> savePackage(@RequestBody MealPackage mealPackage) {
-        packageService.createPackage(mealPackage);
+    public ApiResponse<Void> savePackage(@Valid @RequestBody PackageSaveRequest request) {
+        packageService.createPackage(request);
         return ApiResponse.success();
     }
 
     @PutMapping("/package")
-    public ApiResponse<Void> updatePackage(@RequestBody MealPackage mealPackage) {
-        packageService.updatePackage(mealPackage);
+    public ApiResponse<Void> updatePackage(@Valid @RequestBody PackageSaveRequest request) {
+        packageService.updatePackage(request);
         return ApiResponse.success();
     }
 
@@ -136,40 +136,25 @@ public class ProductController {
     }
 
     // ==================== 库存与流水 ====================
+    // 已废弃传统仓库库存（入库/出库/盘点），仅保留【每日机动配额】支撑单日零散订购
 
-    @GetMapping("/inventory/list")
-    public ApiResponse<PageResult<InventoryVO>> inventoryList(
-            @RequestParam(defaultValue = "1") Long pageNum,
-            @RequestParam(defaultValue = "10") Long pageSize,
-            @RequestParam(required = false) String keyword) {
-        IPage<InventoryVO> page = inventoryService.pageInventory(pageNum, pageSize, keyword);
-        return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
+    @GetMapping("/quota/list")
+    public ApiResponse<List<DailyQuota>> quotaList(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        LocalDate start = StringUtils.hasText(startDate) ? LocalDate.parse(startDate) : null;
+        LocalDate end = StringUtils.hasText(endDate) ? LocalDate.parse(endDate) : null;
+        return ApiResponse.success(dailyQuotaService.listRange(start, end));
     }
 
-    @GetMapping("/inventory/warning")
-    public ApiResponse<List<InventoryVO>> inventoryWarning() {
-        return ApiResponse.success(inventoryService.listWarning());
+    @GetMapping("/quota/remaining")
+    public ApiResponse<Integer> quotaRemaining(@RequestParam String date) {
+        return ApiResponse.success(dailyQuotaService.remaining(LocalDate.parse(date)));
     }
 
-    @PostMapping("/inventory/change")
-    public ApiResponse<Void> changeStock(@Valid @RequestBody InventoryChangeRequest request) {
-        inventoryService.changeStock(request);
+    @PutMapping("/quota")
+    public ApiResponse<Void> setQuota(@Valid @RequestBody DailyQuotaRequest request) {
+        dailyQuotaService.setQuota(request.getQuotaDate(), request.getTotalQuota(), request.getRemark());
         return ApiResponse.success();
-    }
-
-    @PutMapping("/inventory/threshold")
-    public ApiResponse<Void> updateThreshold(@RequestBody InventoryThresholdRequest request) {
-        inventoryService.updateThreshold(request.getId(), request.getWarningThreshold(), request.getWarehouseLocation());
-        return ApiResponse.success();
-    }
-
-    @GetMapping("/inventory/record/list")
-    public ApiResponse<PageResult<InventoryRecordVO>> recordList(
-            @RequestParam(defaultValue = "1") Long pageNum,
-            @RequestParam(defaultValue = "10") Long pageSize,
-            @RequestParam(required = false) Long productId,
-            @RequestParam(required = false) Integer changeType) {
-        IPage<InventoryRecordVO> page = inventoryService.pageRecords(pageNum, pageSize, productId, changeType);
-        return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
     }
 }

@@ -48,6 +48,11 @@ export function signDeliveryRecord(data: { recordId: number; signPerson?: string
   return post('/delivery/record/sign', data)
 }
 
+/** 批量签收（按配送日期，可选班级；班主任由后端强制限定本班） */
+export function batchSignDeliveryRecords(data: { deliveryDate: string; classId?: number }) {
+  return post('/delivery/record/batch-sign', data)
+}
+
 /** 拒收配送记录 */
 export function rejectDeliveryRecord(recordId: number, reason?: string) {
   return post('/delivery/record/reject', null, { params: { recordId, reason } })

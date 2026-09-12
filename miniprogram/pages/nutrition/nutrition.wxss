@@ -112,3 +112,9 @@
   font-size: 28rpx;
   color: #303133;
 }
+
+.empty-hint {
+  font-size: 22rpx;
+  color: #c0c4cc;
+  margin-top: 8rpx;
+}

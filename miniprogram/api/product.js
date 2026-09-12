@@ -23,9 +23,15 @@ function getPackageDetail(id) {
   return get('/product/package/' + id)
 }
 
+/** 某日剩余机动配额（单日零散订购可售盒数） */
+function getQuotaRemaining(date) {
+  return get('/product/quota/remaining', { date })
+}
+
 module.exports = {
   getProductList,
   getProductDetail,
   getPackageList,
-  getPackageDetail
+  getPackageDetail,
+  getQuotaRemaining
 }

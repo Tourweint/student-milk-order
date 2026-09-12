@@ -41,12 +41,9 @@ public class ProductVO implements Serializable {
 
     private Long nutritionId;
 
-    /** 当前库存数量（无库存记录时为 0） */
-    private Integer quantity;
-
     private LocalDateTime createTime;
 
-    public static ProductVO from(Product p, String categoryName, Integer quantity) {
+    public static ProductVO from(Product p, String categoryName) {
         ProductVO vo = new ProductVO();
         vo.setId(p.getId());
         vo.setProductName(p.getProductName());
@@ -61,7 +58,6 @@ public class ProductVO implements Serializable {
         vo.setStatus(p.getStatus());
         vo.setSort(p.getSort());
         vo.setNutritionId(p.getNutritionId());
-        vo.setQuantity(quantity == null ? 0 : quantity);
         vo.setCreateTime(p.getCreateTime());
         return vo;
     }

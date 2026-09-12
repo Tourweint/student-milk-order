@@ -10,8 +10,8 @@
       <el-tab-pane label="套餐管理" name="package">
         <PackageTab />
       </el-tab-pane>
-      <el-tab-pane label="库存与流水" name="inventory">
-        <InventoryTab />
+      <el-tab-pane label="每日机动配额" name="quota">
+        <QuotaTab />
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -22,7 +22,7 @@ import { ref } from 'vue'
 import ProductTab from './components/ProductTab.vue'
 import CategoryTab from './components/CategoryTab.vue'
 import PackageTab from './components/PackageTab.vue'
-import InventoryTab from './components/InventoryTab.vue'
+import QuotaTab from './components/QuotaTab.vue'
 
 const activeTab = ref('product')
 </script>

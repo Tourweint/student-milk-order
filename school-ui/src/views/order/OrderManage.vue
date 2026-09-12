@@ -163,6 +163,12 @@ async function handleDeliver(row: any) {
 }
 
 async function handleComplete(row: any) {
+  // 订单完成不可逆：明确提示配送周期整体送完的后果，二次确认
+  await ElMessageBox.confirm(
+    `订单完成后表示配送周期（${row.deliveryStartDate} 至 ${row.deliveryEndDate}）内的牛奶已全部配送完毕，状态不可回退，也无法再签收或补送；如有波动请先处理未完成配送任务。确定完成订单「${row.orderNo}」吗？`,
+    '完成订单确认',
+    { confirmButtonText: '确定完成', cancelButtonText: '再想想', type: 'warning' }
+  )
   await completeOrder(row.id)
   ElMessage.success('订单已完成')
   fetchList()

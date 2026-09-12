@@ -12,6 +12,7 @@ import com.milk.order.module.clazz.entity.ClassInfo;
 import com.milk.order.module.clazz.entity.Student;
 import com.milk.order.module.clazz.mapper.ClassInfoMapper;
 import com.milk.order.module.clazz.mapper.StudentMapper;
+import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.order.dto.CreateOrderRequest;
 import com.milk.order.module.order.dto.OrderItemRequest;
 import com.milk.order.module.order.dto.WechatPayNotifyRequest;
@@ -26,10 +27,12 @@ import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.order.vo.OrderVO;
 import com.milk.order.module.order.vo.WechatPayParamsVO;
 import com.milk.order.module.product.entity.MealPackage;
+import com.milk.order.module.product.entity.MealPackageItem;
 import com.milk.order.module.product.entity.Product;
+import com.milk.order.module.product.mapper.MealPackageItemMapper;
 import com.milk.order.module.product.mapper.MealPackageMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
-import com.milk.order.module.product.service.InventoryService;
+import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.entity.SysUser;
 import com.milk.order.module.user.mapper.SysUserMapper;
@@ -46,7 +49,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -60,14 +63,24 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     private final StudentMapper studentMapper;
     private final ClassInfoMapper classInfoMapper;
     private final MealPackageMapper mealPackageMapper;
+    private final MealPackageItemMapper mealPackageItemMapper;
     private final ProductMapper productMapper;
     private final SysUserMapper sysUserMapper;
-    private final InventoryService inventoryService;
+    private final DailyQuotaService dailyQuotaService;
     private final DataScopeResolver dataScopeResolver;
     private final WechatPaySimulator wechatPaySimulator;
+    private final DeliveryTaskService deliveryTaskService;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter PAY_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    /** 单号单调序列：同一秒内批量生成单号时，纯随机后缀可能撞唯一键 */
+    private static final AtomicLong NO_SEQ = new AtomicLong(System.currentTimeMillis() % 1000000);
+
+    private String nextNo(String prefix) {
+        return prefix + LocalDateTime.now().format(NO_FMT)
+                + String.format("%06d", NO_SEQ.incrementAndGet() % 1000000);
+    }
 
     // ==================== 查询 ====================
 
@@ -155,17 +168,50 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         if (request.getDeliveryEndDate().isBefore(request.getDeliveryStartDate())) {
             throw new BusinessException("配送结束日期不能早于开始日期");
         }
-        // 3. 校验奶品并计算金额
-        if (CollectionUtils.isEmpty(request.getItems())) {
-            throw new BusinessException("订单明细不能为空");
+        // 零散订购（无套餐）为单日补购：仅允许起止同日；学期套餐为周期配送
+        if (request.getPackageId() == null
+                && !request.getDeliveryStartDate().equals(request.getDeliveryEndDate())) {
+            throw new BusinessException("单日零散订购仅支持选择一个配送日期；周期订购请使用学期套餐");
         }
-        Set<Long> productIds = request.getItems().stream()
+        // 2.1 业务说明：学期套餐覆盖日内也允许单日散订（换口味/加购），仅做配额校验
+
+        // 3. 计算订单明细：套餐订单以套餐固定配置为准（服务端权威，家长不可自选），散订/购物车使用传入明细
+        List<OrderItemRequest> items;
+        if (request.getPackageId() != null) {
+            List<MealPackageItem> pkgItems = mealPackageItemMapper.selectList(
+                    new LambdaQueryWrapper<MealPackageItem>().eq(MealPackageItem::getPackageId, request.getPackageId()));
+            if (CollectionUtils.isEmpty(pkgItems)) {
+                throw new BusinessException("套餐未配置配送明细，请先在管理端完成套餐配置");
+            }
+            items = pkgItems.stream().map(pi -> {
+                OrderItemRequest req = new OrderItemRequest();
+                req.setProductId(pi.getProductId());
+                req.setQuantity(pi.getQuantity());
+                return req;
+            }).collect(Collectors.toList());
+        } else {
+            if (CollectionUtils.isEmpty(request.getItems())) {
+                throw new BusinessException("订单明细不能为空");
+            }
+            items = request.getItems();
+        }
+        Set<Long> productIds = items.stream()
                 .map(OrderItemRequest::getProductId).collect(Collectors.toSet());
         Map<Long, Product> productMap = productMapper.selectBatchIds(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
-        for (OrderItemRequest item : request.getItems()) {
+        for (OrderItemRequest item : items) {
             if (!productMap.containsKey(item.getProductId())) {
                 throw new BusinessException("奶品不存在：id=" + item.getProductId());
+            }
+        }
+
+        // 3.1 零散订购预检当日机动配额（权威扣减在支付成功事务中）
+        if (request.getPackageId() == null) {
+            int boxes = items.stream().mapToInt(OrderItemRequest::getQuantity).sum();
+            int remaining = dailyQuotaService.remaining(request.getDeliveryStartDate());
+            if (boxes > remaining) {
+                throw new BusinessException(
+                        request.getDeliveryStartDate() + " 当日机动配额不足（剩余 " + remaining + " 盒），卖完即止");
             }
         }
 
@@ -186,7 +232,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             payAmount = pkg.getDiscountPrice() == null ? totalAmount : pkg.getDiscountPrice();
         } else {
             totalAmount = BigDecimal.ZERO;
-            for (OrderItemRequest item : request.getItems()) {
+            for (OrderItemRequest item : items) {
                 Product p = productMap.get(item.getProductId());
                 BigDecimal subtotal = p.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
                 totalAmount = totalAmount.add(subtotal);
@@ -201,7 +247,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         // 5. 下单人（由调用方传入，管理端代下单用当前登录用户，续订用原订单家长）
 
         // 6. 生成订单号
-        String orderNo = generateOrderNo();
+        String orderNo = nextNo("MO");
 
         // 7. 保存订单
         OrderInfo order = new OrderInfo();
@@ -221,7 +267,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         save(order);
 
         // 8. 保存明细（快照奶品名称/规格/单价）
-        for (OrderItemRequest item : request.getItems()) {
+        for (OrderItemRequest item : items) {
             Product p = productMap.get(item.getProductId());
             OrderItem oi = new OrderItem();
             oi.setOrderId(order.getId());
@@ -293,13 +339,12 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         if (order.getPayAmount() == null) {
             throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
         }
-        // 1. 扣减库存（每个明细），库存不足会抛异常并回滚
-        List<OrderItem> items = getOrderItems(id);
-        for (OrderItem item : items) {
-            inventoryService.deductForOrder(item.getProductId(), item.getQuantity(), id);
+        // 1. 零散订购扣减当日机动配额（含保质期内结转；学期套餐为全校统一预约定制，不占配额）
+        if (order.getPackageId() == null) {
+            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), sumBoxes(getOrderItems(id)));
         }
         // 2. 写支付记录
-        String transactionId = "MOCK" + LocalDateTime.now().format(NO_FMT) + ThreadLocalRandom.current().nextInt(1000, 9999);
+        String transactionId = nextNo("MOCK");
         PaymentRecord record = new PaymentRecord();
         record.setOrderId(order.getId());
         record.setOrderNo(order.getOrderNo());
@@ -312,8 +357,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         record.setRemark("模拟支付");
         paymentRecordMapper.insert(record);
 
-        // 3. 更新订单状态
+        // 3. 更新订单状态，并展开整个配送周期的配送任务与签收记录（同一事务，幂等）
         markOrderPaid(order, transactionId);
+        deliveryTaskService.generateTasksForOrder(order);
     }
 
     // ==================== 微信支付（模拟）：预下单 + 回调处理 ====================
@@ -388,11 +434,11 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                     order.getOrderNo(), notify.getAmount(), order.getPayAmount());
             return false;
         }
-        // 1. 扣减库存（每个明细），库存不足则本轮回调失败
-        List<OrderItem> items = orderItemMapper.selectList(
-                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
-        for (OrderItem item : items) {
-            inventoryService.deductForOrder(item.getProductId(), item.getQuantity(), order.getId());
+        // 1. 零散订购扣减当日机动配额（含保质期内结转；学期套餐为全校统一预约定制，不占配额），不足则本轮回调失败
+        if (order.getPackageId() == null) {
+            List<OrderItem> items = orderItemMapper.selectList(
+                    new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
+            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), sumBoxes(items));
         }
         // 2. 支付流水：更新预下单的待支付流水为成功，缺失时补建
         PaymentRecord pending = paymentRecordMapper.selectOne(
@@ -429,8 +475,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             record.setRemark("微信支付（模拟）回调成功（无预下单流水，补建）");
             paymentRecordMapper.insert(record);
         }
-        // 3. 更新订单状态
+        // 3. 更新订单状态，并展开整个配送周期的配送任务与签收记录（同一事务，幂等）
         markOrderPaid(order, notify.getTransactionId());
+        deliveryTaskService.generateTasksForOrder(order);
         log.info("[模拟微信支付] 订单 {} 支付成功，流水号 {}", order.getOrderNo(), notify.getTransactionId());
         return true;
     }
@@ -456,12 +503,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                 && !OrderStatus.PAID.getCode().equals(status)) {
             throw new BusinessException("当前订单状态不允许退订（仅待支付/已支付可退）");
         }
-        // 已支付的退订需要回库
-        if (OrderStatus.PAID.getCode().equals(status)) {
-            List<OrderItem> items = getOrderItems(id);
-            for (OrderItem item : items) {
-                inventoryService.restoreForOrder(item.getProductId(), item.getQuantity(), id);
-            }
+        // 已支付的零散订购退订按台账回补配额（学期套餐不占配额，无需回补）
+        if (OrderStatus.PAID.getCode().equals(status) && order.getPackageId() == null) {
+            dailyQuotaService.restore(id);
         }
         // 作废待支付流水（微信预下单后未支付即取消的场景），防止残留悬挂的待支付记录
         List<PaymentRecord> pendings = paymentRecordMapper.selectList(
@@ -477,6 +521,8 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         order.setCancelTime(LocalDateTime.now());
         order.setCancelReason(StringUtils.hasText(reason) ? reason : "用户退订");
         updateById(order);
+        // 联动作废支付后已生成的未签收配送任务，避免退订后仍可签收
+        deliveryTaskService.cancelPendingTasksForOrder(id);
     }
 
     // ==================== 配送/完成 ====================
@@ -511,6 +557,11 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             throw new BusinessException("订单不存在");
         }
         return order;
+    }
+
+    /** 明细总盒数（零散订购占用当日机动配额的数量） */
+    private int sumBoxes(List<OrderItem> items) {
+        return items.stream().mapToInt(OrderItem::getQuantity).sum();
     }
 
     /**
@@ -567,7 +618,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     }
 
     private String generateOrderNo() {
-        return "MO" + LocalDateTime.now().format(NO_FMT) + ThreadLocalRandom.current().nextInt(1000, 9999);
+        return nextNo("MO");
     }
 
     private String statusText(Integer status) {

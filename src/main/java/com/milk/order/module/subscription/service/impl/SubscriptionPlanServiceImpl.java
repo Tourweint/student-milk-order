@@ -106,6 +106,10 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
         if (pkg == null) {
             throw new BusinessException("套餐不存在");
         }
+        // 续订规则：仅月度套餐支持自动续订；学期套餐为一次性购买，散订订单为一次性配送
+        if (pkg.getPackageType() != null && pkg.getPackageType() == 2) {
+            throw new BusinessException("学期套餐为一次性购买，不支持自动续订");
+        }
         // 校验原订单
         OrderInfo original = orderInfoMapper.selectById(request.getOriginalOrderId());
         if (original == null) {
@@ -116,6 +120,11 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
                 && !OrderStatus.DELIVERING.getCode().equals(oStatus)
                 && !OrderStatus.COMPLETED.getCode().equals(oStatus)) {
             throw new BusinessException("仅已支付/配送中/已完成订单可开启续订");
+        }
+        // 散订订单（起止同日，一次性配送）不可续订：续订会按周期展开成每日配送，与散订语义不符
+        if (original.getDeliveryStartDate() != null
+                && original.getDeliveryStartDate().equals(original.getDeliveryEndDate())) {
+            throw new BusinessException("散订订单为一次性配送，不支持自动续订，如需再次购买请直接下单");
         }
         // 同一学生同一原订单不能重复开启
         Long exists = baseMapper.selectCount(new LambdaQueryWrapper<SubscriptionPlan>()

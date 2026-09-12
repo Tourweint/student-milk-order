@@ -28,11 +28,6 @@
       <view class="menu-text">配送记录</view>
       <view class="menu-arrow">›</view>
     </view>
-    <view class="menu-item" bindtap="goPage" data-name="自动续订" data-url="/pages/subscription/subscription">
-      <view class="menu-icon">🔁</view>
-      <view class="menu-text">自动续订</view>
-      <view class="menu-arrow">›</view>
-    </view>
   </view>
 
   <!-- 退出登录 -->

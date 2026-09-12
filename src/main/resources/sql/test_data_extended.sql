@@ -278,13 +278,11 @@ INSERT INTO nutrition_info (id, product_id, energy, protein, fat, carbohydrate, 
 (7, 7, 350.00, 2.60, 2.80, 13.00, 88.00, 44.00),
 (8, 8, 200.00, 1.00, 1.50, 8.00, 60.00, 35.00);
 
--- 新增库存
-INSERT INTO inventory (id, product_id, quantity, warning_threshold, warehouse_location) VALUES
-(5, 5, 250, 60, 'B区-01'),
-(6, 6, 180, 50, 'B区-02'),
-(7, 7, 150, 40, 'B区-03'),
-(8, 8, 60, 100, 'B区-04'),
-(9, 9, 0, 50, 'B区-05');
+-- 新增每日机动配额（替代已下线的传统库存）
+INSERT INTO daily_quota (quota_date, total_quota, used_quota, remark) VALUES
+(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 60, 0, '机动配额');
 
 -- ============================================================
 -- 7. 扩展套餐明细
@@ -484,43 +482,4 @@ INSERT INTO subscription_plan (student_id, user_id, package_id, original_order_i
 (15,19, 1, 15, 1, 1, '2026-10-01 00:00:00', '2026-09-01 00:00:00', 0, '自动续订中');
 
 -- ============================================================
--- 15. 库存变动记录
--- ============================================================
-INSERT INTO inventory_record (product_id, change_type, change_quantity, before_quantity, after_quantity, order_id, operator_id, remark) VALUES
-(1, 1, 1000, 0,    1000, NULL, 1, '初始入库'),
-(1, 2, 500,  1000, 500,  NULL, 1, '配送出库'),
-(2, 1, 800,  0,    800,  NULL, 1, '初始入库'),
-(2, 2, 500,  800,  300,  NULL, 1, '配送出库'),
-(3, 1, 500,  0,    500,  NULL, 1, '初始入库'),
-(3, 2, 300,  500,  200,  NULL, 1, '配送出库'),
-(4, 1, 600,  0,    600,  NULL, 1, '初始入库'),
-(4, 2, 200,  600,  400,  NULL, 1, '配送出库'),
-(5, 1, 300,  0,    300,  NULL, 1, '初始入库'),
-(5, 2, 50,   300,  250,  NULL, 1, '配送出库'),
-(8, 1, 200,  0,    200,  NULL, 1, '初始入库'),
-(8, 2, 140,  200,  60,   NULL, 1, '配送出库（库存偏低）'),
-(1, 3, 10,   490,  500,  NULL, 1, '盘点盘盈'),
-(3, 4, 5,    205,  200,  NULL, 1, '盘点盘亏');
-
--- ============================================================
--- 16. 操作日志
--- ============================================================
-INSERT INTO operation_log (user_id, username, operation, method, request_url, request_method, request_params, ip, cost_time, status, create_time) VALUES
-(1, 'admin',    '用户登录', 'AuthController.login',       '/api/auth/login',       'POST', '{"username":"admin"}',    '127.0.0.1', 120, 1, '2026-09-01 08:00:00'),
-(1, 'admin',    '创建年级', 'GradeController.create',     '/api/grade',            'POST', '{"gradeName":"四年级"}',  '127.0.0.1', 85,  1, '2026-09-01 08:05:00'),
-(1, 'admin',    '创建班级', 'ClassController.create',     '/api/class',            'POST', '{"className":"四年级1班"}','127.0.0.1', 90,  1, '2026-09-01 08:10:00'),
-(2, 'teacher',  '用户登录', 'AuthController.login',       '/api/auth/login',       'POST', '{"username":"teacher"}',  '127.0.0.1', 110, 1, '2026-09-01 08:15:00'),
-(7, 'parent1',  '用户登录', 'AuthController.login',       '/api/auth/login',       'POST', '{"username":"parent1"}',  '127.0.0.1', 100, 1, '2026-09-01 09:00:00'),
-(7, 'parent1',  '创建订单', 'OrderController.create',     '/api/order',            'POST', '{"studentId":1,"packageId":1}', '127.0.0.1', 200, 1, '2026-09-01 09:05:00'),
-(8, 'parent2',  '模拟支付', 'OrderController.pay',        '/api/order/3/pay',      'POST', '{"orderId":3}',           '127.0.0.1', 150, 1, '2026-08-30 10:15:00'),
-(1, 'admin',    '导出学生', 'StudentController.export',   '/api/student/export',   'GET',  '{"classId":1}',            '127.0.0.1', 300, 1, '2026-09-01 10:00:00'),
-(1, 'admin',    '导入学生', 'StudentController.import',   '/api/student/import',   'POST', '{"classId":1,"file":"..."}','127.0.0.1', 500, 1, '2026-09-01 10:30:00'),
-(2, 'teacher',  '查看本班订单','OrderController.page',    '/api/order',            'GET',  '{"classId":1}',            '127.0.0.1', 60,  1, '2026-09-01 11:00:00'),
-(10,'parent4',  '退订订单', 'OrderController.cancel',     '/api/order/13/cancel',  'POST', '{"reason":"孩子暑假回老家"}','127.0.0.1', 180, 1, '2026-07-05 14:00:00'),
-(1, 'admin',    '库存入库', 'InventoryController.inbound','/api/inventory/inbound','POST', '{"productId":1,"quantity":1000}','127.0.0.1', 95, 1, '2026-08-01 08:00:00');
-
--- ============================================================
--- 数据导入完成
--- ============================================================
-SELECT '扩展测试数据导入完成！' AS message;
-SELECT '账号说明：admin/teacher2-5/parent1-28，密码均为 123456' AS account_info;
+-- 15. 库存变动记录（传统库存已下线，此节移除；如需演示数据请使用 daily_quota）

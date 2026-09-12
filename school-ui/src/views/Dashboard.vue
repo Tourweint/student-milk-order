@@ -12,7 +12,7 @@
         <StatsCard label="本月销售额" :value="stats.monthlySales" icon="Money" icon-bg="#e6a23c" />
       </el-col>
       <el-col :span="6">
-        <StatsCard label="库存预警" :value="stats.warningCount" icon="Warning" icon-bg="#f56c6c" />
+        <StatsCard label="今日机动余量" :value="stats.todayQuotaRemaining" icon="Warning" icon-bg="#f56c6c" />
       </el-col>
     </el-row>
 
@@ -62,7 +62,7 @@ const stats = reactive({
   totalOrders: 0,
   activeStudents: 0,
   monthlySales: '¥0',
-  warningCount: 0
+  todayQuotaRemaining: 0
 })
 
 const trendChartRef = ref<HTMLElement>()
@@ -112,7 +112,7 @@ async function loadDashboard() {
   stats.totalOrders = d.totalOrders || 0
   stats.activeStudents = d.activeStudents || 0
   stats.monthlySales = '¥' + Number(d.monthlySales || 0).toFixed(2)
-  stats.warningCount = d.warningCount || 0
+  stats.todayQuotaRemaining = d.todayQuotaRemaining || 0
 }
 
 async function loadTrend() {

@@ -14,6 +14,7 @@
       </el-select>
       <el-button type="primary" @click="fetchList">查询</el-button>
       <el-button @click="handleReset">重置</el-button>
+      <el-button type="success" :loading="batchSigning" @click="handleBatchSign">批量签收</el-button>
     </div>
 
     <!-- 表格 -->
@@ -78,7 +79,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getDeliveryRecordList, signDeliveryRecord, rejectDeliveryRecord
+  getDeliveryRecordList, signDeliveryRecord, rejectDeliveryRecord, batchSignDeliveryRecords
 } from '@/api/delivery'
 import { getAllClass } from '@/api/clazz'
 import { getStudentList } from '@/api/student'
@@ -94,6 +95,7 @@ const signPerson = ref('')
 const signRemark = ref('')
 const signing = ref(false)
 const currentRecord = ref<any>(null)
+const batchSigning = ref(false)
 
 const query = reactive({
   pageNum: 1, pageSize: 10,
@@ -174,6 +176,38 @@ async function confirmSign() {
     fetchList()
   } finally {
     signing.value = false
+  }
+}
+
+/** 按配送日期（可选班级）批量签收当日全部未签收记录 */
+async function handleBatchSign() {
+  if (!queryDate.value) {
+    ElMessage.warning('请先选择配送日期')
+    return
+  }
+  const cls = query.classId ? classList.value.find((c) => c.id === query.classId) : null
+  const scopeText = cls ? `班级「${classLabel(cls)}」` : '全部班级'
+  try {
+    await ElMessageBox.confirm(
+      `确定将 ${queryDate.value} ${scopeText} 的全部未签收记录批量签收吗？签收后将逐条生成营养摄入记录。`,
+      '批量签收确认',
+      { confirmButtonText: '确定签收', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  batchSigning.value = true
+  try {
+    const res: any = await batchSignDeliveryRecords({ deliveryDate: queryDate.value, classId: query.classId })
+    const count = Number(res?.data ?? 0)
+    if (count > 0) {
+      ElMessage.success(`已批量签收 ${count} 条记录`)
+    } else {
+      ElMessage.info('该日期下没有可签收的未签收记录')
+    }
+    fetchList()
+  } finally {
+    batchSigning.value = false
   }
 }
 

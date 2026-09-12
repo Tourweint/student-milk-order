@@ -12,7 +12,7 @@
       <text class="price-num">{{product.price}}</text>
       <text class="price-unit">/盒</text>
     </view>
-    <view class="hero-stock">库存 {{product.quantity}} 盒</view>
+    <view class="hero-stock">单日零散订购受每日机动配额限制，卖完即止</view>
   </view>
 
   <!-- 商品信息 -->
@@ -23,7 +23,7 @@
 
   <!-- 购买数量 -->
   <view class="card">
-    <view class="card-title">购买数量（每日配送盒数）</view>
+    <view class="card-title">购买数量（盒）</view>
     <view class="qty-row">
       <view class="stepper">
         <view class="stepper-btn" bindtap="decreaseQty">−</view>
@@ -31,6 +31,7 @@
         <view class="stepper-btn stepper-btn-active" bindtap="increaseQty">＋</view>
       </view>
     </view>
+    <view class="qty-hint">散订为一次性配送，所选盒数在配送日一次送齐；月度/学期订购请使用首页套餐</view>
   </view>
 
   <!-- 底部订购栏 -->
@@ -38,10 +39,6 @@
     <view class="footer-cart" bindtap="goCart">
       <view class="cart-icon">🛒</view>
       <view wx:if="{{cartCount > 0}}" class="cart-badge">{{cartCount}}</view>
-    </view>
-    <view class="footer-price">
-      <text class="text-price">¥{{product.price}}</text>
-      <text class="text-muted footer-unit">/盒</text>
     </view>
     <button class="btn-cart footer-btn" bindtap="addToCart" disabled="{{product.status !== 1}}">加入购物车</button>
     <button class="btn-primary footer-btn" bindtap="goOrder" disabled="{{product.status !== 1}}">

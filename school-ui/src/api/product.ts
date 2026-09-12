@@ -76,29 +76,19 @@ export function deletePackage(id: number) {
   return del(`/product/package/${id}`)
 }
 
-// ==================== 库存与流水 ====================
+// ==================== 每日机动配额（单日零散订购用） ====================
 
-/** 库存分页列表 */
-export function getInventoryList(params: { pageNum: number; pageSize: number; keyword?: string }) {
-  return get('/product/inventory/list', params)
+/** 配额列表（日期区间） */
+export function getQuotaList(params: { startDate?: string; endDate?: string }) {
+  return get('/product/quota/list', params)
 }
 
-/** 库存预警列表 */
-export function getInventoryWarning() {
-  return get('/product/inventory/warning')
+/** 某日剩余机动盒数 */
+export function getQuotaRemaining(date: string) {
+  return get('/product/quota/remaining', { date })
 }
 
-/** 库存变动（入库/出库/盘盈/盘亏） */
-export function changeInventory(data: { productId: number; changeType: number; changeQuantity: number; remark?: string }) {
-  return post('/product/inventory/change', data)
-}
-
-/** 设置预警阈值/库位 */
-export function updateInventoryThreshold(data: { id: number; warningThreshold?: number; warehouseLocation?: string }) {
-  return put('/product/inventory/threshold', data)
-}
-
-/** 库存流水分页 */
-export function getInventoryRecords(params: { pageNum: number; pageSize: number; productId?: number; changeType?: number }) {
-  return get('/product/inventory/record/list', params)
+/** 设置某日机动配额 */
+export function setQuota(data: { quotaDate: string; totalQuota: number; remark?: string }) {
+  return put('/product/quota', data)
 }

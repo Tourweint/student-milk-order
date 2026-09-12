@@ -69,23 +69,15 @@
   padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 20rpx;
   box-sizing: border-box;
 }
 
-.footer-price {
-  font-size: 30rpx;
-  margin: 0 8rpx;
-}
-
-.footer-unit {
-  font-size: 22rpx;
-  margin-left: 4rpx;
-}
-
 .footer-btn {
-  width: 200rpx;
-  font-size: 26rpx;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  font-size: 28rpx;
   padding-left: 0;
   padding-right: 0;
 }
@@ -171,4 +163,11 @@
 /* 页面底部留白，避免被固定栏遮挡 */
 .container {
   padding-bottom: 140rpx;
+}
+
+.qty-hint {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 12rpx;
+  line-height: 1.6;
 }

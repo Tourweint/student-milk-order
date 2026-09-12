@@ -24,11 +24,6 @@
       <el-table-column label="单价" width="90">
         <template #default="{ row }">¥{{ Number(row.price).toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column label="库存" width="90">
-        <template #default="{ row }">
-          <span :class="{ 'low-stock': row.quantity <= 0 }">{{ row.quantity }}</span>
-        </template>
-      </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">
@@ -212,5 +207,4 @@ onMounted(() => {
 }
 .toolbar { margin-bottom: 16px; }
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
-.low-stock { color: #f56c6c; font-weight: 600; }
 </style>

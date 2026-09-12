@@ -180,37 +180,30 @@ CREATE TABLE IF NOT EXISTS meal_package_item (
     KEY idx_product_id (product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='套餐明细表';
 
--- 库存表
-CREATE TABLE IF NOT EXISTS inventory (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '库存ID',
-    product_id BIGINT NOT NULL COMMENT '奶品ID',
-    quantity INT NOT NULL DEFAULT 0 COMMENT '当前库存数量',
-    warning_threshold INT DEFAULT 0 COMMENT '预警阈值',
-    warehouse_location VARCHAR(100) COMMENT '仓库位置',
+-- 每日机动配额表（单日零散订购用；学期套餐为统一预约定制，不占配额）
+CREATE TABLE IF NOT EXISTS daily_quota (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '配额ID',
+    quota_date DATE NOT NULL COMMENT '配额日期',
+    total_quota INT NOT NULL COMMENT '当日机动总盒数（管理员设置）',
+    used_quota INT NOT NULL DEFAULT 0 COMMENT '当日已售盒数',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
-    UNIQUE KEY uk_product_id (product_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库存表';
+    UNIQUE KEY uk_quota_date (quota_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日机动配额表';
 
--- 库存变动记录表
-CREATE TABLE IF NOT EXISTS inventory_record (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID',
-    product_id BIGINT NOT NULL COMMENT '奶品ID',
-    change_type TINYINT NOT NULL COMMENT '变动类型：1-入库，2-出库，3-盘盈，4-盘亏',
-    change_quantity INT NOT NULL COMMENT '变动数量',
-    before_quantity INT COMMENT '变动前库存',
-    after_quantity INT COMMENT '变动后库存',
-    order_id BIGINT COMMENT '关联订单ID',
-    operator_id BIGINT COMMENT '操作人ID',
-    remark VARCHAR(255) COMMENT '备注',
+-- 每日机动配额扣减台账（按订单记录从各日池子扣减的盒数，供退订精确回补）
+CREATE TABLE IF NOT EXISTS daily_quota_usage (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '台账ID',
+    order_id BIGINT NOT NULL COMMENT '订单ID',
+    quota_date DATE NOT NULL COMMENT '被扣减的池子日期',
+    boxes INT NOT NULL COMMENT '扣减盒数',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
-    KEY idx_product_id (product_id),
-    KEY idx_change_type (change_type)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='库存变动记录表';
+    KEY idx_order_id (order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日机动配额扣减台账';
 
 -- ============================================================
 -- 4. 订单核心模块
@@ -224,7 +217,7 @@ CREATE TABLE IF NOT EXISTS order_info (
     user_id BIGINT NOT NULL COMMENT '家长用户ID（下单人）',
     class_id BIGINT NOT NULL COMMENT '班级ID',
     package_id BIGINT COMMENT '套餐ID',
-    order_type TINYINT NOT NULL COMMENT '订单类型：1-按月订购，2-按学期订购',
+    order_type TINYINT NOT NULL COMMENT '订单类型：1-单日零散订购，2-学期套餐订购',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '订单状态：1-待支付，2-已支付，3-配送中，4-已完成，5-已退订',
     total_amount DECIMAL(10,2) NOT NULL COMMENT '订单总金额（元）',
     pay_amount DECIMAL(10,2) COMMENT '实付金额（元）',

@@ -6,25 +6,36 @@
       <text class="row-label">配送学生</text>
       <text class="row-value">{{student.studentName || '未绑定'}}</text>
     </view>
-    <view class="row">
-      <text class="row-label">开始日期</text>
+    <view class="row" wx:if="{{mode !== 'package'}}">
+      <text class="row-label">配送日期</text>
       <picker mode="date" value="{{startDate}}" bindchange="onStartChange">
         <view class="picker-value">{{startDate || '请选择'}}</view>
       </picker>
     </view>
-    <view class="row">
-      <text class="row-label">结束日期</text>
-      <picker mode="date" value="{{endDate}}" bindchange="onEndChange">
-        <view class="picker-value">{{endDate || '请选择'}}</view>
-      </picker>
+    <view class="row" wx:if="{{mode !== 'package'}}">
+      <text class="row-label">当日机动余量</text>
+      <text class="row-value {{quotaRemaining === 0 ? 'text-price' : ''}}">{{quotaRemaining === null ? '—' : quotaRemaining}} 盒</text>
     </view>
-    <view class="row">
-      <text class="row-label">配送周期</text>
-      <text class="row-value text-muted">{{startDate && endDate ? startDate + ' ~ ' + endDate : ''}}</text>
+    <view class="row" wx:if="{{mode !== 'package'}}">
+      <text class="row-value text-muted">散订按盒数一次性配送，占用当日机动余量（含保质期内结转），卖完即止</text>
     </view>
+    <block wx:if="{{mode === 'package'}}">
+      <view class="row">
+        <text class="row-label">开始日期</text>
+        <text class="row-value">{{startDate}}</text>
+      </view>
+      <view class="row">
+        <text class="row-label">结束日期</text>
+        <text class="row-value">{{endDate}}</text>
+      </view>
+      <view class="row">
+        <text class="row-label">配送周期</text>
+        <text class="row-value text-muted">{{package && package.packageType === 2 ? '本学期一次性订购（约5个月），不支持自动续订' : '固定一个月，支持自动续订'}}（周期内每日配送）</text>
+      </view>
+    </block>
   </view>
 
-  <!-- 套餐模式：套餐信息 -->
+  <!-- 套餐模式：套餐信息（含固定内容，提交前确认） -->
   <view class="card" wx:if="{{mode === 'package' && package}}">
     <view class="card-title">套餐</view>
     <view class="row">
@@ -35,14 +46,24 @@
       <text class="row-label">套餐价格</text>
       <text class="row-value text-price">¥{{package.discountPrice || package.originalPrice}}</text>
     </view>
-    <view class="pkg-tip">套餐下单需选择配送奶品明细（数量×盒数）</view>
+    <view class="row" wx:if="{{package.description}}">
+      <text class="row-label">套餐说明</text>
+      <text class="row-value">{{package.description}}</text>
+    </view>
+    <view class="pkg-sec-title">套餐包含（每日配送）</view>
+    <view class="pkg-line" wx:for="{{items}}" wx:key="productId">
+      <text class="pkg-line-name">{{item.name}}</text>
+      <text class="pkg-line-meta">{{item.spec || ''}} · 每日 {{item.quantity}} 盒</text>
+    </view>
+    <view wx:if="{{!items.length}}" class="pkg-tip">套餐内容未配置，请稍后再试或联系管理员</view>
+    <view class="pkg-tip">套餐内容固定不可自选；想喝其他口味可用"散订"单独购买，次日配送</view>
   </view>
 
   <!-- 明细 -->
-  <view class="card">
-    <view class="card-title">{{mode === 'package' ? '选择奶品明细' : '订购奶品'}}</view>
+  <view class="card" wx:if="{{mode !== 'package'}}">
+    <view class="card-title">订购奶品</view>
 
-    <!-- 奶品直购模式：单奶品 stepper -->
+    <!-- 奶品直购模式：单奶品 stepper（散订按盒数） -->
     <view wx:if="{{mode === 'product' && items.length}}">
       <view class="line-item">
         <view class="line-info">
@@ -57,8 +78,8 @@
       </view>
     </view>
 
-    <!-- 套餐 / 购物车模式：多奶品明细 -->
-    <view wx:if="{{(mode === 'package' || mode === 'cart') && items.length}}">
+    <!-- 购物车模式：多奶品明细（可调整数量） -->
+    <view wx:if="{{mode === 'cart' && items.length}}">
       <view class="line-item" wx:for="{{items}}" wx:key="productId">
         <view class="line-info">
           <view class="line-name">{{item.name}}</view>
@@ -69,18 +90,6 @@
           <view class="stepper-num">{{item.quantity}}</view>
           <view class="stepper-btn stepper-btn-active" bindtap="increase" data-index="{{index}}">＋</view>
         </view>
-      </view>
-    </view>
-
-    <!-- 套餐模式：可选奶品 -->
-    <view wx:if="{{mode === 'package'}}">
-      <view class="card-title pkg-subtitle">添加奶品</view>
-      <view class="pkg-option" wx:for="{{productList}}" wx:key="id" bindtap="addProduct" data-id="{{item.id}}">
-        <view class="line-info">
-          <view class="line-name">{{item.productName}}</view>
-          <view class="line-meta">{{item.spec || ''}} · ¥{{item.price}}/盒</view>
-        </view>
-        <view class="add-btn">＋ 添加</view>
       </view>
     </view>
   </view>

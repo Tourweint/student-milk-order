@@ -65,12 +65,6 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '营养统计', icon: 'Histogram' }
       },
       {
-        path: 'subscription',
-        name: 'SubscriptionManage',
-        component: () => import('@/views/subscription/SubscriptionManage.vue'),
-        meta: { title: '自动续订', icon: 'RefreshRight', roles: ['ADMIN'] }
-      },
-      {
         path: 'system',
         name: 'SystemManage',
         component: () => import('@/views/system/SystemManage.vue'),

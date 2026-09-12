@@ -13,7 +13,7 @@
   <view class="container">
     <!-- 汇总指标 -->
     <view class="card">
-      <view class="card-title">营养摄入汇总（近{{activeDays}}天）</view>
+      <view class="card-title">营养摄入汇总（{{activeDays === 0 ? '全部' : '近' + activeDays + '天'}}）</view>
       <view class="metric-grid">
         <view class="metric">
           <view class="metric-value">{{totals.ml}}</view>
@@ -67,7 +67,11 @@
         <view wx:elif="{{!hasMore}}" class="empty">— 没有更多了 —</view>
       </view>
       <view wx:elif="{{loading}}" class="empty">加载中…</view>
-      <view wx:else class="empty">该时段暂无摄入记录</view>
+      <view wx:elif="{{loadError}}" class="empty">加载失败，请切换日期范围重试</view>
+      <view wx:else class="empty">
+        <view>该时段暂无摄入记录</view>
+        <view class="empty-hint">摄入记录在班主任/管理员签收配送后自动生成</view>
+      </view>
     </view>
   </view>
 </view>

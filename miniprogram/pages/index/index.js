@@ -44,8 +44,17 @@ Page({
   },
 
   goProduct(e) {
-    const id = e.currentTarget.dataset.id
-    wx.navigateTo({ url: '/pages/product/product?id=' + id })
+    const id = Number(e.currentTarget.dataset.id)
+    // 列表里已有该奶品数据，先行传给详情页渲染，详情页再自行刷新最新数据
+    const product = this.data.products.find((x) => x.id === id)
+    wx.navigateTo({
+      url: '/pages/product/product?id=' + id,
+      success: (res) => {
+        if (product) {
+          res.eventChannel.emit('productCache', product)
+        }
+      }
+    })
   },
 
   goPackage(e) {
@@ -61,7 +70,7 @@ Page({
       wx.showToast({ title: '该奶品已下架', icon: 'none' })
       return
     }
-    cart.add(product, 1, product.quantity)
+    cart.add(product, 1)
     this.setData({ cartCount: cart.getCount() })
     wx.showToast({ title: '已加入购物车', icon: 'success' })
   },

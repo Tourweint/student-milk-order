@@ -11,10 +11,10 @@ import com.milk.order.module.order.entity.OrderInfo;
 import com.milk.order.module.order.entity.OrderItem;
 import com.milk.order.module.order.mapper.OrderInfoMapper;
 import com.milk.order.module.order.mapper.OrderItemMapper;
-import com.milk.order.module.product.entity.Inventory;
+
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.entity.ProductCategory;
-import com.milk.order.module.product.mapper.InventoryMapper;
+import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.mapper.ProductCategoryMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.stats.service.StatsService;
@@ -45,7 +45,7 @@ public class StatsServiceImpl implements StatsService {
     private final ClassInfoMapper classInfoMapper;
     private final ProductMapper productMapper;
     private final ProductCategoryMapper productCategoryMapper;
-    private final InventoryMapper inventoryMapper;
+    private final DailyQuotaService dailyQuotaService;
     private final NutritionIntakeMapper nutritionIntakeMapper;
 
     private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("MM-dd");
@@ -79,13 +79,8 @@ public class StatsServiceImpl implements StatsService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         vo.setMonthlySales(monthlySales);
 
-        // 库存预警数
-        List<Inventory> inventories = inventoryMapper.selectList(null);
-        long warningCount = inventories.stream()
-                .filter(i -> i.getWarningThreshold() != null && i.getQuantity() != null
-                        && i.getQuantity() <= i.getWarningThreshold())
-                .count();
-        vo.setWarningCount(warningCount);
+        // 今日机动配额剩余（仅单日零散订购占用）
+        vo.setTodayQuotaRemaining((long) dailyQuotaService.remaining(java.time.LocalDate.now()));
 
         return vo;
     }

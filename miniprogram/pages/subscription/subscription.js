@@ -74,7 +74,8 @@ Page({
         productApi.getPackageList(),
         orderApi.getOrderList({ pageNum: 1, pageSize: 50, status: 2 })
       ])
-      const packages = pkgRes || []
+      // 续订规则：仅月度套餐（packageType=1）支持自动续订，学期套餐为一次性购买不可选
+      const packages = (pkgRes || []).filter((p) => p.packageType === 1)
       const paidOrders = ((orderRes && orderRes.list) || []).map((o) => ({
         id: o.id,
         orderNo: o.orderNo,

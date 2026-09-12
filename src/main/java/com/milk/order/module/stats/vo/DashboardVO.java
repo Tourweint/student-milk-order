@@ -21,5 +21,6 @@ public class DashboardVO implements Serializable {
     private BigDecimal monthlySales;
 
     /** 库存预警数 */
-    private Long warningCount;
+    /** 今日机动配额剩余（单日零散订购可售盒数；学期套餐不占配额） */
+    private Long todayQuotaRemaining;
 }

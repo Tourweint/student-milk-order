@@ -86,7 +86,6 @@ const menuList: { path: string; title: string; icon: string; roles?: string[] }[
   { path: '/order', title: '订单管理', icon: 'List' },
   { path: '/delivery', title: '配送管理', icon: 'Van' },
   { path: '/nutrition', title: '营养统计', icon: 'Histogram' },
-  { path: '/subscription', title: '自动续订', icon: 'RefreshRight', roles: ['ADMIN'] },
   { path: '/system', title: '系统管理', icon: 'Setting', roles: ['ADMIN'] }
 ]
 

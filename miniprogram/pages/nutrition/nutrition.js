@@ -18,7 +18,8 @@ Page({
   data: {
     ranges: [
       { label: '近7天', days: 7 },
-      { label: '近30天', days: 30 }
+      { label: '近30天', days: 30 },
+      { label: '全部', days: 0 }
     ],
     activeDays: 7,
     summaryList: [],
@@ -27,7 +28,8 @@ Page({
     pageNum: 1,
     pageSize: 10,
     hasMore: true,
-    loading: false
+    loading: false,
+    loadError: false
   },
 
   onShow() {
@@ -45,8 +47,11 @@ Page({
     this.reload()
   },
 
-  /** 计算日期范围：结束今天，开始往前推 */
+  /** 计算日期范围：结束今天，开始往前推；days=0 表示不限（全部） */
   calcRange() {
+    if (this.data.activeDays === 0) {
+      return { startDate: undefined, endDate: undefined }
+    }
     const end = new Date()
     const start = addDays(end, -(this.data.activeDays - 1))
     return { startDate: fmtDate(start), endDate: fmtDate(end) }
@@ -92,10 +97,13 @@ Page({
         totals: totalsView,
         records: this.data.pageNum === 1 ? list : this.data.records.concat(list),
         hasMore: this.data.records.length + list.length < ((intakePage && intakePage.total) || 0),
-        pageNum: this.data.pageNum + 1
+        pageNum: this.data.pageNum + 1,
+        loadError: false
       })
     } catch (e) {
       console.error('加载营养数据失败', e)
+      // request.js 已对业务/网络错误 toast，这里补充页面内提示，避免静默空白
+      this.setData({ loadError: true, records: [], summaryList: [], totals: { ml: 0, energy: '0.0', protein: '0.0', calcium: '0' } })
     } finally {
       this.setData({ loading: false })
     }

@@ -3,7 +3,6 @@ package com.milk.order.module.order.dto;
 import lombok.Data;
 
 import javax.validation.Valid;
-import javax.validation.constraints.NotEmpty;
 import javax.validation.constraints.NotNull;
 import java.io.Serializable;
 import java.time.LocalDate;
@@ -30,8 +29,10 @@ public class CreateOrderRequest implements Serializable {
     @NotNull(message = "配送结束日期不能为空")
     private LocalDate deliveryEndDate;
 
-    /** 订单明细（奶品 + 每日数量），必传，用于扣库存与配送 */
-    @NotEmpty(message = "订单明细不能为空")
+    /**
+     * 订单明细（奶品 + 数量）。
+     * 散订/购物车必传（数量=订购盒数）；套餐订单可缺省，服务端以套餐固定配置为准。
+     */
     @Valid
     private List<OrderItemRequest> items;
 

@@ -158,3 +158,32 @@
 .container {
   padding-bottom: 140rpx;
 }
+
+.pkg-sec-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+  margin: 20rpx 0 8rpx;
+}
+
+.pkg-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.pkg-line:last-of-type {
+  border-bottom: none;
+}
+
+.pkg-line-name {
+  font-size: 28rpx;
+  color: #303133;
+}
+
+.pkg-line-meta {
+  font-size: 24rpx;
+  color: #909399;
+}

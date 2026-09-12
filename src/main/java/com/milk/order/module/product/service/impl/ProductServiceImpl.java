@@ -5,17 +5,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.milk.order.common.constant.SystemConstants;
 import com.milk.order.exception.BusinessException;
-import com.milk.order.module.product.entity.Inventory;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.entity.ProductCategory;
 import com.milk.order.module.product.mapper.ProductMapper;
-import com.milk.order.module.product.service.InventoryService;
 import com.milk.order.module.product.service.ProductCategoryService;
 import com.milk.order.module.product.service.ProductService;
 import com.milk.order.module.product.vo.ProductVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
@@ -29,7 +26,6 @@ import java.util.stream.Collectors;
 public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> implements ProductService {
 
     private final ProductCategoryService categoryService;
-    private final InventoryService inventoryService;
 
     @Override
     public IPage<ProductVO> pageProducts(Long pageNum, Long pageSize, Long categoryId, String keyword) {
@@ -55,7 +51,15 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    public ProductVO getProductDetail(Long id) {
+        Product product = getById(id);
+        if (product == null) {
+            return null;
+        }
+        return convert(Collections.singletonList(product)).get(0);
+    }
+
+    @Override
     public void createProduct(Product product) {
         validate(product);
         if (product.getStatus() == null) {
@@ -65,8 +69,6 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
             product.setSort(0);
         }
         save(product);
-        // 自动初始化一条 0 库存
-        inventoryService.ensureInventory(product.getId());
     }
 
     @Override
@@ -83,14 +85,12 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void removeProduct(Long id) {
         Product exists = getById(id);
         if (exists == null) {
             throw new BusinessException("奶品不存在");
         }
-        // 逻辑删奶品，同时清理其库存记录（流水保留作历史统计）
-        inventoryService.lambdaUpdate().eq(Inventory::getProductId, id).remove();
+        // 逻辑删奶品；如被套餐固定明细引用，由管理端自行调整套餐配置
         removeById(id);
     }
 
@@ -118,14 +118,9 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         Map<Long, ProductCategory> categoryMap = categoryService.listByIds(categoryIds).stream()
                 .collect(Collectors.toMap(ProductCategory::getId, Function.identity()));
 
-        Set<Long> productIds = products.stream().map(Product::getId).collect(Collectors.toSet());
-        Map<Long, Integer> quantityMap = inventoryService.lambdaQuery()
-                .in(Inventory::getProductId, productIds).list().stream()
-                .collect(Collectors.toMap(Inventory::getProductId, Inventory::getQuantity, (a, b) -> a));
-
         return products.stream().map(p -> {
             ProductCategory c = categoryMap.get(p.getCategoryId());
-            return ProductVO.from(p, c == null ? null : c.getCategoryName(), quantityMap.get(p.getId()));
+            return ProductVO.from(p, c == null ? null : c.getCategoryName());
         }).collect(Collectors.toList());
     }
 }

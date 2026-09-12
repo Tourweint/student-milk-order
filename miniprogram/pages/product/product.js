@@ -15,6 +15,15 @@ Page({
 
   onLoad(options) {
     this.productId = Number(options.id)
+    // 优先用列表页传来的数据立即渲染，避免等待网络请求
+    const channel = this.getOpenerEventChannel && this.getOpenerEventChannel()
+    if (channel && channel.on) {
+      channel.on('productCache', (p) => {
+        if (p && Number(p.id) === this.productId && !this.data.product) {
+          this.setData({ product: p })
+        }
+      })
+    }
     this.loadDetail()
   },
 
@@ -42,7 +51,7 @@ Page({
 
   increaseQty() {
     const product = this.data.product
-    const max = product && product.quantity != null ? product.quantity : 99
+    const max = 99
     if (this.data.buyQty >= max) {
       wx.showToast({ title: '已达库存上限', icon: 'none' })
       return

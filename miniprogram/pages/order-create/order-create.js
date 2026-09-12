@@ -22,6 +22,11 @@ function addDays(base, days) {
   d.setDate(d.getDate() + days)
   return d
 }
+function addMonths(base, months) {
+  const d = new Date(base)
+  d.setMonth(d.getMonth() + months)
+  return d
+}
 
 Page({
   data: {
@@ -29,11 +34,11 @@ Page({
     student: null,
     product: null,
     package: null,
-    productList: [],        // package 模式可选奶品
-    items: [],              // {productId, name, spec, price, quantity}
+    items: [],              // {productId, name, spec, price, quantity}；套餐模式下为服务端配置的固定明细（只读）
     total: 0,
     startDate: '',
     endDate: '',
+    quotaRemaining: null,
     remark: '',
     submitting: false
   },
@@ -43,12 +48,13 @@ Page({
       : options.mode === 'cart' ? 'cart' : 'product'
     this.targetId = Number(options.productId || options.packageId || 0)
     this.initQty = Number(options.qty) > 0 ? Number(options.qty) : 1
-    const today = new Date()
-    const start = addDays(today, 1)
+    const tomorrow = fmtDate(addDays(new Date(), 1))
+    // 散订（奶品直购/购物车）为一次性配送：起止同日，按盒数展开一个配送任务；
+    // 套餐（月度/学期）为周期配送：起止区间内每日配送，默认区间在加载套餐后按套餐类型填充
     this.setData({
       mode: this.mode,
-      startDate: fmtDate(start),
-      endDate: fmtDate(addDays(start, 30))
+      startDate: tomorrow,
+      endDate: tomorrow
     })
     this.init()
   },
@@ -83,18 +89,31 @@ Page({
         }
         this.setData({ student: me, items, total: this.calcTotal(items) })
       } else {
-        const [pkg, prodRes] = await Promise.all([
-          productApi.getPackageDetail(this.targetId),
-          productApi.getProductList({ pageNum: 1, pageSize: 50 })
-        ])
+        // 套餐内容固定（服务端配置为准），家长不可自选奶品
+        const pkg = await productApi.getPackageDetail(this.targetId)
+        const pkgItems = ((pkg && pkg.items) || []).map((it) => ({
+          productId: it.productId,
+          name: it.productName,
+          spec: it.spec,
+          quantity: it.quantity
+        }))
+        // 套餐配送区间固定：月度=1个月，学期=约5个月，家长不可修改
+        const start = addDays(new Date(), 1)
+        const months = pkg && pkg.packageType === 2 ? 5 : 1
+        const end = addDays(addMonths(start, months), -1)
+        // 合计直接取套餐价；注意 setData 前不能依赖 this.data.package（尚未生效）
+        const total = Number(pkg.discountPrice || pkg.originalPrice || 0)
         this.setData({
           package: pkg,
           student: me,
-          productList: (prodRes && prodRes.list) || [],
-          items,
-          total: this.calcTotal()
+          items: pkgItems,
+          total,
+          startDate: fmtDate(start),
+          endDate: fmtDate(end)
         })
       }
+      // 散订模式展示所选日期机动余量
+      this.loadQuotaRemaining()
     } catch (e) {
       console.error('下单页初始化失败', e)
     } finally {
@@ -102,9 +121,10 @@ Page({
     }
   },
 
-  // ==================== 数量调整 ====================
+  // ==================== 数量调整（散订专用；套餐明细固定不可调整） ====================
 
   increase(e) {
+    if (this.mode === 'package') return
     const index = Number(e.currentTarget.dataset.index)
     const items = this.data.items.slice()
     items[index].quantity += 1
@@ -112,42 +132,37 @@ Page({
   },
 
   decrease(e) {
+    if (this.mode === 'package') return
     const index = Number(e.currentTarget.dataset.index)
     const items = this.data.items.slice()
     if (items[index].quantity > 1) {
       items[index].quantity -= 1
-    } else if (this.data.mode === 'package' || this.data.mode === 'cart') {
-      // 套餐/购物车模式：减到 0 表示移除该奶品（提交时过滤）
+      this.setData({ items, total: this.calcTotal(items) })
+    } else if (this.data.mode === 'cart') {
+      // 购物车模式：减到 0 表示移除该奶品（提交时过滤）
       items[index].quantity = 0
+      this.setData({ items, total: this.calcTotal(items) })
     }
-    this.setData({ items, total: this.calcTotal(items) })
-  },
-
-  /** package 模式：从可选奶品加入明细 */
-  addProduct(e) {
-    const id = Number(e.currentTarget.dataset.id)
-    const p = this.data.productList.find((x) => x.id === id)
-    if (!p) return
-    const items = this.data.items.slice()
-    const exists = items.find((x) => x.productId === id)
-    if (exists) {
-      exists.quantity += 1
-    } else {
-      items.push({ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: 1 })
-    }
-    this.setData({ items, total: this.calcTotal(items) })
   },
 
   // ==================== 日期 ====================
 
   onStartChange(e) {
+    // 仅散订可改配送日期（起止同日）；套餐配送周期固定，由页面只读展示
     const start = e.detail.value
-    const end = this.data.endDate
-    this.setData({ startDate: start, endDate: start > end ? start : end, total: this.calcTotal() })
+    this.setData({ startDate: start, endDate: start })
+    this.loadQuotaRemaining()
   },
 
-  onEndChange(e) {
-    this.setData({ endDate: e.detail.value, total: this.calcTotal() })
+  /** 散订模式：查询所选日期的机动配额余量 */
+  async loadQuotaRemaining() {
+    if (this.mode === 'package' || !this.data.startDate) return
+    try {
+      const remaining = await productApi.getQuotaRemaining(this.data.startDate)
+      this.setData({ quotaRemaining: remaining == null ? null : Number(remaining) })
+    } catch (e) {
+      this.setData({ quotaRemaining: null })
+    }
   },
 
   onRemarkInput(e) {

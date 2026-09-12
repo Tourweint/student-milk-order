@@ -44,6 +44,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -66,6 +67,14 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Pattern ML_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*ml", Pattern.CASE_INSENSITIVE);
 
+    /** 任务号单调序列：整期任务在同一事务的同一秒内批量生成，纯随机后缀必撞 uk_task_no 唯一键 */
+    private static final AtomicLong TASK_SEQ = new AtomicLong(System.currentTimeMillis() % 1000000);
+
+    private String nextTaskNo() {
+        return "DT" + LocalDateTime.now().format(NO_FMT)
+                + String.format("%06d", TASK_SEQ.incrementAndGet() % 1000000);
+    }
+
     // ==================== 生成配送任务 ====================
 
     @Override
@@ -87,42 +96,75 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
 
         int count = 0;
         for (OrderInfo order : orders) {
-            List<OrderItem> items = orderItemMapper.selectList(
-                    new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
+            count += generateTasksForOrderDate(order, date);
+        }
+        return count;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int generateTasksForOrder(OrderInfo order) {
+        LocalDate start = order.getDeliveryStartDate();
+        LocalDate end = order.getDeliveryEndDate();
+        if (start == null || end == null || end.isBefore(start)) {
+            return 0;
+        }
+        List<OrderItem> items = orderItemMapper.selectList(
+                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
+        if (items.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
             for (OrderItem item : items) {
-                // 幂等：同日期+订单+奶品已生成则跳过
-                Long exists = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
-                        .eq(DeliveryTask::getDeliveryDate, date)
-                        .eq(DeliveryTask::getOrderId, order.getId())
-                        .eq(DeliveryTask::getProductId, item.getProductId()));
-                if (exists != null && exists > 0) {
-                    continue;
-                }
-                // 创建任务
-                DeliveryTask task = new DeliveryTask();
-                task.setTaskNo("DT" + LocalDateTime.now().format(NO_FMT) + ThreadLocalRandom.current().nextInt(1000, 9999));
-                task.setDeliveryDate(date);
-                task.setClassId(order.getClassId());
-                task.setOrderId(order.getId());
-                task.setStudentId(order.getStudentId());
-                task.setProductId(item.getProductId());
-                task.setQuantity(item.getQuantity());
-                task.setStatus(1); // 待配送
-                baseMapper.insert(task);
-
-                // 创建签收记录
-                DeliveryRecord record = new DeliveryRecord();
-                record.setTaskId(task.getId());
-                record.setStudentId(order.getStudentId());
-                record.setProductId(item.getProductId());
-                record.setQuantity(item.getQuantity());
-                record.setSignStatus(2); // 未签收
-                deliveryRecordMapper.insert(record);
-
-                count++;
+                count += createTaskIfAbsent(order, item, date);
             }
         }
         return count;
+    }
+
+    /** 为单个订单展开某一日期的任务（generateTasks 复用） */
+    private int generateTasksForOrderDate(OrderInfo order, LocalDate date) {
+        List<OrderItem> items = orderItemMapper.selectList(
+                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
+        int count = 0;
+        for (OrderItem item : items) {
+            count += createTaskIfAbsent(order, item, date);
+        }
+        return count;
+    }
+
+    /**
+     * 创建某订单某奶品某日期的任务与签收记录；幂等：同日期+订单+奶品已生成则跳过
+     */
+    private int createTaskIfAbsent(OrderInfo order, OrderItem item, LocalDate date) {
+        Long exists = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getDeliveryDate, date)
+                .eq(DeliveryTask::getOrderId, order.getId())
+                .eq(DeliveryTask::getProductId, item.getProductId()));
+        if (exists != null && exists > 0) {
+            return 0;
+        }
+        DeliveryTask task = new DeliveryTask();
+        task.setTaskNo(nextTaskNo());
+        task.setDeliveryDate(date);
+        task.setClassId(order.getClassId());
+        task.setOrderId(order.getId());
+        task.setStudentId(order.getStudentId());
+        task.setProductId(item.getProductId());
+        task.setQuantity(item.getQuantity());
+        task.setStatus(1); // 待配送
+        baseMapper.insert(task);
+
+        // 创建签收记录
+        DeliveryRecord record = new DeliveryRecord();
+        record.setTaskId(task.getId());
+        record.setStudentId(order.getStudentId());
+        record.setProductId(item.getProductId());
+        record.setQuantity(item.getQuantity());
+        record.setSignStatus(2); // 未签收
+        deliveryRecordMapper.insert(record);
+        return 1;
     }
 
     // ==================== 任务查询 ====================
@@ -197,21 +239,68 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (record.getSignStatus() != 2) {
             throw new BusinessException("仅未签收记录可签收");
         }
-        // 1. 更新签收记录
+        String signPerson = StringUtils.hasText(request.getSignPerson())
+                ? request.getSignPerson() : SecurityUtils.getCurrentUsername();
+        doSign(record, signPerson, request.getRemark());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchSign(String deliveryDate, Long classId) {
+        if (!StringUtils.hasText(deliveryDate)) {
+            throw new BusinessException("请选择配送日期");
+        }
+        LocalDate date;
+        try {
+            date = LocalDate.parse(deliveryDate);
+        } catch (Exception e) {
+            throw new BusinessException("配送日期格式不正确");
+        }
+        // 数据权限：班主任仅能批量签收本班，家长无该操作权限（接口层已限制 ADMIN/TEACHER）
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getClassId() != null) {
+            classId = scope.getClassId();
+        }
+
+        // 找到该日期（可选班级）下全部未签收记录
+        LambdaQueryWrapper<DeliveryTask> taskWrapper = new LambdaQueryWrapper<>();
+        taskWrapper.eq(DeliveryTask::getDeliveryDate, date)
+                .eq(classId != null, DeliveryTask::getClassId, classId);
+        List<DeliveryTask> tasks = baseMapper.selectList(taskWrapper);
+        if (tasks.isEmpty()) {
+            return 0;
+        }
+        List<DeliveryRecord> records = deliveryRecordMapper.selectList(
+                new LambdaQueryWrapper<DeliveryRecord>()
+                        .in(DeliveryRecord::getTaskId, tasks.stream().map(DeliveryTask::getId).collect(Collectors.toSet()))
+                        .eq(DeliveryRecord::getSignStatus, 2));
+
+        String signPerson = SecurityUtils.getCurrentUsername();
+        for (DeliveryRecord record : records) {
+            doSign(record, signPerson, null);
+        }
+        return records.size();
+    }
+
+    /**
+     * 签收单条记录的共用流程：更新签收记录 → 任务完成 → 生成营养摄入记录。
+     * 调用方需保证记录处于未签收状态，且在事务内。
+     */
+    private void doSign(DeliveryRecord record, String signPerson, String remark) {
         record.setSignStatus(1); // 已签收
         record.setSignTime(LocalDateTime.now());
-        record.setSignPerson(StringUtils.hasText(request.getSignPerson()) ? request.getSignPerson() : SecurityUtils.getCurrentUsername());
-        if (StringUtils.hasText(request.getRemark())) {
-            record.setRemark(request.getRemark());
+        record.setSignPerson(signPerson);
+        if (StringUtils.hasText(remark)) {
+            record.setRemark(remark);
         }
         deliveryRecordMapper.updateById(record);
 
-        // 2. 更新任务状态为已完成
+        // 任务状态为已完成
         DeliveryTask task = getTask(record.getTaskId());
         task.setStatus(3); // 已完成
         updateById(task);
 
-        // 3. 生成营养摄入记录
+        // 生成营养摄入记录
         generateNutritionIntake(record, task);
     }
 
@@ -233,6 +322,34 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         DeliveryTask task = getTask(record.getTaskId());
         task.setStatus(4);
         updateById(task);
+    }
+
+    // ==================== 订单退订联动 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int cancelPendingTasksForOrder(Long orderId) {
+        List<DeliveryTask> tasks = baseMapper.selectList(
+                new LambdaQueryWrapper<DeliveryTask>().eq(DeliveryTask::getOrderId, orderId));
+        int count = 0;
+        for (DeliveryTask task : tasks) {
+            if (task.getStatus() != 1 && task.getStatus() != 2) {
+                continue;
+            }
+            task.setStatus(4); // 已取消
+            task.setRemark("订单已退订，任务作废");
+            updateById(task);
+            // 同步取消未签收的签收记录
+            DeliveryRecord record = deliveryRecordMapper.selectOne(
+                    new LambdaQueryWrapper<DeliveryRecord>().eq(DeliveryRecord::getTaskId, task.getId()));
+            if (record != null && record.getSignStatus() == 2) {
+                record.setSignStatus(3); // 拒收
+                record.setRemark("订单已退订");
+                deliveryRecordMapper.updateById(record);
+            }
+            count++;
+        }
+        return count;
     }
 
     // ==================== 配送记录查询 ====================

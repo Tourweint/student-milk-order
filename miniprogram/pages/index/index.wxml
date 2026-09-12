@@ -36,7 +36,6 @@
           <text wx:if="{{item.flavor}}"> · {{item.flavor}}</text>
           <text> · {{item.categoryName || '奶品'}}</text>
         </view>
-        <view class="product-stock">库存 {{item.quantity}} 盒</view>
       </view>
       <view class="product-right">
         <view class="text-price product-price">¥{{item.price}}</view>
