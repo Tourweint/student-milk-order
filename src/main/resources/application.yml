@@ -42,6 +42,13 @@ wechat:
   secret: ""           # 小程序 AppSecret（禁止提交真实值）
   mock-enabled: true   # 未配置真实 appid/secret 时按 code 生成模拟 openid，便于本地联调；上线前关闭并配置真实值
 
+# 微信支付模拟配置（仅本地模拟支付链路，非真实商户配置；上线前整体移除）
+wxpay:
+  mock:
+    api-key: mock-wxpay-api-key                                          # 模拟商户密钥，用于回调报文签名/验签（非真实凭据）
+    notify-url: http://127.0.0.1:8090/api/pay/wechat/notify              # 模拟微信回调商户后端的通知地址
+    notify-delay-ms: 500                                                 # 模拟异步回调延迟（毫秒）
+
 # 日志
 logging:
   level:

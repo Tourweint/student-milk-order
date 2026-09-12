@@ -21,12 +21,29 @@
     <view class="desc">{{product.description || '暂无描述'}}</view>
   </view>
 
+  <!-- 购买数量 -->
+  <view class="card">
+    <view class="card-title">购买数量（每日配送盒数）</view>
+    <view class="qty-row">
+      <view class="stepper">
+        <view class="stepper-btn" bindtap="decreaseQty">−</view>
+        <view class="stepper-num">{{buyQty}}</view>
+        <view class="stepper-btn stepper-btn-active" bindtap="increaseQty">＋</view>
+      </view>
+    </view>
+  </view>
+
   <!-- 底部订购栏 -->
   <view class="footer-bar">
+    <view class="footer-cart" bindtap="goCart">
+      <view class="cart-icon">🛒</view>
+      <view wx:if="{{cartCount > 0}}" class="cart-badge">{{cartCount}}</view>
+    </view>
     <view class="footer-price">
       <text class="text-price">¥{{product.price}}</text>
       <text class="text-muted footer-unit">/盒</text>
     </view>
+    <button class="btn-cart footer-btn" bindtap="addToCart" disabled="{{product.status !== 1}}">加入购物车</button>
     <button class="btn-primary footer-btn" bindtap="goOrder" disabled="{{product.status !== 1}}">
       {{product.status === 1 ? '立即订购' : '已下架'}}
     </button>

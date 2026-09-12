@@ -57,8 +57,8 @@
       </view>
     </view>
 
-    <!-- 套餐模式：已选明细 -->
-    <view wx:if="{{mode === 'package' && items.length}}">
+    <!-- 套餐 / 购物车模式：多奶品明细 -->
+    <view wx:if="{{(mode === 'package' || mode === 'cart') && items.length}}">
       <view class="line-item" wx:for="{{items}}" wx:key="productId">
         <view class="line-info">
           <view class="line-name">{{item.name}}</view>

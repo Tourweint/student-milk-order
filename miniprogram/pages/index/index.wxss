@@ -112,3 +112,32 @@
   padding: 6rpx 24rpx;
   display: inline-block;
 }
+
+/* 卡片标题行（标题 + 购物车入口） */
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cart-link {
+  font-size: 24rpx;
+  color: #409eff;
+}
+
+/* 加购按钮（catchtap，不冒泡） */
+.product-actions {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.product-add {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: #67c23a;
+  border: 1rpx solid #67c23a;
+  border-radius: 8rpx;
+  padding: 6rpx 20rpx;
+  display: inline-block;
+}

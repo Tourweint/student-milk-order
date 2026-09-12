@@ -3,12 +3,15 @@
  * 进入方式：
  *   mode=product&productId=x   奶品直购（单奶品 + 数量）
  *   mode=package&packageId=x   套餐订购（套餐价 + 勾选奶品明细）
- * 提交：createOrder → payOrder（模拟支付）→ 跳订单列表
+ *   mode=cart                  购物车结算（多奶品明细，支付成功后清空购物车）
+ * 提交：createOrder → 模拟微信支付（预下单→确认→回调）→ 跳订单列表
  */
 const auth = require('../../utils/auth')
 const authApi = require('../../api/auth')
 const productApi = require('../../api/product')
 const orderApi = require('../../api/order')
+const cart = require('../../utils/cart')
+const pay = require('../../utils/pay')
 
 const pad = (n) => (n < 10 ? '0' + n : '' + n)
 function fmtDate(d) {
@@ -36,8 +39,10 @@ Page({
   },
 
   onLoad(options) {
-    this.mode = options.mode === 'package' ? 'package' : 'product'
+    this.mode = options.mode === 'package' ? 'package'
+      : options.mode === 'cart' ? 'cart' : 'product'
     this.targetId = Number(options.productId || options.packageId || 0)
+    this.initQty = Number(options.qty) > 0 ? Number(options.qty) : 1
     const today = new Date()
     const start = addDays(today, 1)
     this.setData({
@@ -67,8 +72,16 @@ Page({
       let items = []
       if (this.mode === 'product') {
         const p = await productApi.getProductDetail(this.targetId)
-        items = [{ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: 1 }]
-        this.setData({ product: p, student: me, items, total: this.calcTotal() })
+        items = [{ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: this.initQty }]
+        this.setData({ product: p, student: me, items, total: this.calcTotal(items) })
+      } else if (this.mode === 'cart') {
+        items = cart.getItems()
+        if (!items.length) {
+          wx.showToast({ title: '购物车是空的', icon: 'none' })
+          setTimeout(() => wx.navigateBack(), 600)
+          return
+        }
+        this.setData({ student: me, items, total: this.calcTotal(items) })
       } else {
         const [pkg, prodRes] = await Promise.all([
           productApi.getPackageDetail(this.targetId),
@@ -95,7 +108,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index)
     const items = this.data.items.slice()
     items[index].quantity += 1
-    this.setData({ items, total: this.calcTotal() })
+    this.setData({ items, total: this.calcTotal(items) })
   },
 
   decrease(e) {
@@ -103,10 +116,11 @@ Page({
     const items = this.data.items.slice()
     if (items[index].quantity > 1) {
       items[index].quantity -= 1
-    } else if (this.data.mode === 'package') {
+    } else if (this.data.mode === 'package' || this.data.mode === 'cart') {
+      // 套餐/购物车模式：减到 0 表示移除该奶品（提交时过滤）
       items[index].quantity = 0
     }
-    this.setData({ items, total: this.calcTotal() })
+    this.setData({ items, total: this.calcTotal(items) })
   },
 
   /** package 模式：从可选奶品加入明细 */
@@ -114,16 +128,14 @@ Page({
     const id = Number(e.currentTarget.dataset.id)
     const p = this.data.productList.find((x) => x.id === id)
     if (!p) return
-    const exists = this.data.items.find((x) => x.productId === id)
+    const items = this.data.items.slice()
+    const exists = items.find((x) => x.productId === id)
     if (exists) {
       exists.quantity += 1
-      this.setData({ items: this.data.items.slice(), total: this.calcTotal() })
     } else {
-      this.setData({
-        items: this.data.items.concat([{ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: 1 }]),
-        total: this.calcTotal()
-      })
+      items.push({ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: 1 })
     }
+    this.setData({ items, total: this.calcTotal(items) })
   },
 
   // ==================== 日期 ====================
@@ -144,11 +156,20 @@ Page({
 
   // ==================== 合计 ====================
 
-  calcTotal() {
+  /**
+   * 合计金额（前端展示用）
+   * @param {Array} [items] 参与计算的明细；不传时取 this.data.items。
+   *   setData 前计算合计必须传入最新明细，否则会用到旧数据（购物车结算页合计显示 0 的原因）
+   * 金额按分（整数）累加再转回元，避免浮点误差出现 70.0000000001 一类展示
+   */
+  calcTotal(items) {
+    items = items || this.data.items
     if (this.data.mode === 'package' && this.data.package) {
       return Number(this.data.package.discountPrice || this.data.package.originalPrice || 0)
     }
-    return this.data.items.reduce((sum, x) => sum + Number(x.price) * x.quantity, 0)
+    const cents = items.reduce(
+      (sum, x) => sum + Math.round(Number(x.price) * 100) * x.quantity, 0)
+    return cents / 100
   },
 
   // ==================== 提交 ====================
@@ -180,11 +201,17 @@ Page({
         items: items.map((x) => ({ productId: x.productId, quantity: x.quantity })),
         remark: this.data.remark
       })
-      // 模拟支付
-      wx.showLoading({ title: '支付中' })
-      await orderApi.payOrder(orderId)
-      wx.hideLoading()
-      wx.showToast({ title: '下单并支付成功', icon: 'success' })
+      // 购物车下单成功即清空购物车（奶品已进入订单，避免残留重复下单）
+      if (this.mode === 'cart') {
+        cart.clear()
+      }
+      // 模拟微信支付：预下单 → 确认扣款 → 微信异步回调后端 → 轮询结果
+      const result = await pay.requestWechatPay(orderId)
+      if (result.paid) {
+        wx.showToast({ title: '下单并支付成功', icon: 'success' })
+      } else {
+        wx.showToast({ title: result.message, icon: 'none' })
+      }
       setTimeout(() => {
         wx.redirectTo({ url: '/pages/order-list/order-list?status=1' })
       }, 800)

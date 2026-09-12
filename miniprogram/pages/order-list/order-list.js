@@ -3,6 +3,7 @@
  */
 const auth = require('../../utils/auth')
 const orderApi = require('../../api/order')
+const pay = require('../../utils/pay')
 
 const TABS = [
   { code: 0, label: '全部' },
@@ -84,36 +85,43 @@ Page({
     wx.navigateTo({ url: '/pages/order-detail/order-detail?id=' + id })
   },
 
-  /** 去支付（模拟支付） */
+  /** 去支付（模拟微信支付） */
   async handlePay(e) {
     const id = Number(e.currentTarget.dataset.id)
     this.setData({ paying: id })
-    wx.showLoading({ title: '支付中' })
     try {
-      await orderApi.payOrder(id)
-      wx.hideLoading()
-      wx.showToast({ title: '支付成功', icon: 'success' })
-      this.reload()
+      const result = await pay.requestWechatPay(id)
+      if (result.paid) {
+        wx.showToast({ title: '支付成功', icon: 'success' })
+        this.reload()
+      } else {
+        wx.showToast({ title: result.message, icon: 'none' })
+      }
     } catch (err) {
-      wx.hideLoading()
+      // 预下单失败等业务错误已由 request.js 统一提示
+      console.error('发起支付失败', err)
     } finally {
       this.setData({ paying: null })
     }
   },
 
-  /** 退订 */
+  /** 取消支付（待支付）/ 退订（已支付）：均走 cancelOrder，按订单状态区分文案 */
   handleCancel(e) {
     const id = Number(e.currentTarget.dataset.id)
+    const order = this.data.orders.find((x) => x.id === id)
+    const paid = order && order.status === 2
     wx.showModal({
-      title: '确认退订',
-      content: '退订后已支付金额将退回（模拟），确认退订该订单？',
+      title: paid ? '确认退订' : '取消支付',
+      content: paid
+        ? '退订后已支付金额将退回（模拟），确认退订该订单？'
+        : '订单尚未支付，取消后订单将作废，确认取消支付？',
       success: async (res) => {
         if (!res.confirm) return
-        wx.showLoading({ title: '退订中' })
+        wx.showLoading({ title: paid ? '退订中' : '取消中' })
         try {
-          await orderApi.cancelOrder(id, '用户申请退订')
+          await orderApi.cancelOrder(id, paid ? '用户申请退订' : '用户取消支付')
           wx.hideLoading()
-          wx.showToast({ title: '已退订', icon: 'success' })
+          wx.showToast({ title: paid ? '已退订' : '已取消', icon: 'success' })
           this.reload()
         } catch (err) {
           wx.hideLoading()

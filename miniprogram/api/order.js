@@ -18,10 +18,7 @@ function createOrder(data) {
   return post('/order', data)
 }
 
-/** 模拟支付 */
-function payOrder(id) {
-  return post('/order/pay/' + id)
-}
+/** 模拟支付已升级为微信支付模拟链路，见 api/pay.js 与 utils/pay.js */
 
 /** 退订（reason 为 query 参数） */
 function cancelOrder(id, reason) {
@@ -32,6 +29,5 @@ module.exports = {
   getOrderList,
   getOrderDetail,
   createOrder,
-  payOrder,
   cancelOrder
 }

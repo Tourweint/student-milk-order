@@ -1,13 +1,16 @@
 /**
- * 奶品详情页
+ * 奶品详情页：数量选择 + 加入购物车 / 立即订购
  */
 const auth = require('../../utils/auth')
 const productApi = require('../../api/product')
+const cart = require('../../utils/cart')
 
 Page({
   data: {
     product: null,
-    loading: true
+    loading: true,
+    buyQty: 1,
+    cartCount: 0
   },
 
   onLoad(options) {
@@ -18,7 +21,9 @@ Page({
   onShow() {
     if (!auth.isLogin()) {
       wx.reLaunch({ url: '/pages/login/login' })
+      return
     }
+    this.setData({ cartCount: cart.getCount() })
   },
 
   async loadDetail() {
@@ -33,8 +38,42 @@ Page({
     }
   },
 
-  /** 立即订购：跳下单页（奶品模式） */
+  // ==================== 数量调整 ====================
+
+  increaseQty() {
+    const product = this.data.product
+    const max = product && product.quantity != null ? product.quantity : 99
+    if (this.data.buyQty >= max) {
+      wx.showToast({ title: '已达库存上限', icon: 'none' })
+      return
+    }
+    this.setData({ buyQty: this.data.buyQty + 1 })
+  },
+
+  decreaseQty() {
+    if (this.data.buyQty > 1) {
+      this.setData({ buyQty: this.data.buyQty - 1 })
+    }
+  },
+
+  // ==================== 加购 / 下单 ====================
+
+  addToCart() {
+    const product = this.data.product
+    if (!product || product.status !== 1) return
+    cart.add(product, this.data.buyQty, product.quantity)
+    this.setData({ cartCount: cart.getCount() })
+    wx.showToast({ title: '已加入购物车', icon: 'success' })
+  },
+
+  /** 立即订购：携带数量跳下单页（奶品模式） */
   goOrder() {
-    wx.navigateTo({ url: '/pages/order-create/order-create?mode=product&productId=' + this.productId })
+    wx.navigateTo({
+      url: '/pages/order-create/order-create?mode=product&productId=' + this.productId + '&qty=' + this.data.buyQty
+    })
+  },
+
+  goCart() {
+    wx.navigateTo({ url: '/pages/cart/cart' })
   }
 })

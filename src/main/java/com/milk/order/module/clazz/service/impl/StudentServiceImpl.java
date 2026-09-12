@@ -36,8 +36,9 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
 
     @Override
     public IPage<StudentVO> pageStudents(Long pageNum, Long pageSize, Long classId, String keyword) {
-        // 数据权限：家长仅看自己绑定的学生，班主任仅看本班，管理员不限
-        DataScope scope = dataScopeResolver.resolve();
+        // 数据权限：家长仅看自己绑定的学生，班主任仅看本班，管理员不限；
+        // 用 resolveQuietly 兼容免认证的绑定搜索（bind-student/search），该场景未登录时放行；列表接口本身有网关层登录/角色保证
+        DataScope scope = dataScopeResolver.resolveQuietly();
         if (scope.getClassId() != null) {
             classId = scope.getClassId();
         }

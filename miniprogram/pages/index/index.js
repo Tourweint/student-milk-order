@@ -3,12 +3,14 @@
  */
 const auth = require('../../utils/auth')
 const productApi = require('../../api/product')
+const cart = require('../../utils/cart')
 
 Page({
   data: {
     user: null,
     packages: [],
     products: [],
+    cartCount: 0,
     loading: true
   },
 
@@ -31,7 +33,8 @@ Page({
       this.setData({
         user: auth.getUser(),
         packages: pkgRes || [],
-        products: (prodRes && prodRes.list) || []
+        products: (prodRes && prodRes.list) || [],
+        cartCount: cart.getCount()
       })
     } catch (e) {
       console.error('加载首页数据失败', e)
@@ -48,5 +51,22 @@ Page({
   goPackage(e) {
     const id = e.currentTarget.dataset.id
     wx.navigateTo({ url: '/pages/order-create/order-create?mode=package&packageId=' + id })
+  },
+
+  /** 快速加购（不跳转，catchtap 阻止冒泡到进详情页） */
+  addCart(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    const product = this.data.products.find((x) => x.id === id)
+    if (!product || product.status !== 1) {
+      wx.showToast({ title: '该奶品已下架', icon: 'none' })
+      return
+    }
+    cart.add(product, 1, product.quantity)
+    this.setData({ cartCount: cart.getCount() })
+    wx.showToast({ title: '已加入购物车', icon: 'success' })
+  },
+
+  goCart() {
+    wx.navigateTo({ url: '/pages/cart/cart' })
   }
 })

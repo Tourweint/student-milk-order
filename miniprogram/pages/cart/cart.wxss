@@ -1,0 +1,132 @@
+/* 明细行（与下单页同款 stepper 风格） */
+.line-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.line-item:last-child {
+  border-bottom: none;
+}
+
+.line-info {
+  flex: 1;
+  min-width: 0;
+  margin-right: 16rpx;
+}
+
+.line-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.line-meta {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 6rpx;
+}
+
+/* 数量 stepper */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.stepper-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: #f0f2f5;
+  color: #606266;
+  font-size: 32rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stepper-btn-active {
+  background: #ecf5ff;
+  color: #409eff;
+}
+
+.stepper-num {
+  min-width: 64rpx;
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+/* 删除按钮 */
+.remove-btn {
+  margin-left: 20rpx;
+  font-size: 24rpx;
+  color: #f56c6c;
+  border: 1rpx solid #f56c6c;
+  border-radius: 8rpx;
+  padding: 8rpx 16rpx;
+}
+
+.cart-tip {
+  font-size: 22rpx;
+  color: #c0c4cc;
+  text-align: center;
+  margin-top: 24rpx;
+}
+
+/* 底部固定栏 */
+.footer-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ffffff;
+  border-top: 1rpx solid #ebeef5;
+  padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+.footer-price {
+  font-size: 36rpx;
+}
+
+.footer-unit {
+  font-size: 24rpx;
+  margin-left: 4rpx;
+}
+
+.footer-btn {
+  width: 320rpx;
+}
+
+.container {
+  padding-bottom: 140rpx;
+}
+
+/* 空购物车 */
+.empty-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 200rpx;
+}
+
+.empty-icon {
+  font-size: 96rpx;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #909399;
+  margin: 24rpx 0 40rpx;
+}
+
+.empty-btn {
+  width: 320rpx;
+}

@@ -2,6 +2,7 @@ package com.milk.order.module.auth.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.milk.order.common.enums.RoleType;
+import com.milk.order.common.ratelimit.RegisterRateLimiter;
 import com.milk.order.exception.BusinessException;
 import com.milk.order.module.auth.dto.LoginRequest;
 import com.milk.order.module.auth.dto.RegisterRequest;
@@ -33,6 +34,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.context.request.RequestAttributes;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.List;
 import java.util.UUID;
@@ -52,6 +56,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final StudentMapper studentMapper;
     private final StudentService studentService;
+    private final RegisterRateLimiter registerRateLimiter;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -105,6 +110,9 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void register(RegisterRequest request) {
+        // 入口限频：同一 IP 60 秒内最多 1 次、1 小时内最多 5 次，防脚本批量注册
+        registerRateLimiter.check(resolveClientIp());
+
         // 1. 校验用户名唯一
         if (sysUserService.isUsernameExists(request.getUsername(), null)) {
             throw new BusinessException("用户名已存在");
@@ -170,6 +178,17 @@ public class AuthServiceImpl implements AuthService {
             }
         }
         return response;
+    }
+
+    /**
+     * 解析当前请求客户端 IP（注册限频用）；无请求上下文（内部调用）时返回 null
+     */
+    private String resolveClientIp() {
+        RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs instanceof ServletRequestAttributes) {
+            return ((ServletRequestAttributes) attrs).getRequest().getRemoteAddr();
+        }
+        return null;
     }
 
     private SysRole getRoleByCode(String roleCode) {

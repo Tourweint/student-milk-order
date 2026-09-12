@@ -14,14 +14,17 @@ import com.milk.order.module.clazz.mapper.ClassInfoMapper;
 import com.milk.order.module.clazz.mapper.StudentMapper;
 import com.milk.order.module.order.dto.CreateOrderRequest;
 import com.milk.order.module.order.dto.OrderItemRequest;
+import com.milk.order.module.order.dto.WechatPayNotifyRequest;
 import com.milk.order.module.order.entity.OrderInfo;
 import com.milk.order.module.order.entity.OrderItem;
 import com.milk.order.module.order.entity.PaymentRecord;
 import com.milk.order.module.order.mapper.OrderInfoMapper;
 import com.milk.order.module.order.mapper.OrderItemMapper;
 import com.milk.order.module.order.mapper.PaymentRecordMapper;
+import com.milk.order.module.order.pay.WechatPaySimulator;
 import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.order.vo.OrderVO;
+import com.milk.order.module.order.vo.WechatPayParamsVO;
 import com.milk.order.module.product.entity.MealPackage;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.MealPackageMapper;
@@ -32,6 +35,7 @@ import com.milk.order.module.user.entity.SysUser;
 import com.milk.order.module.user.mapper.SysUserMapper;
 import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -46,6 +50,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo> implements OrderInfoService {
@@ -59,8 +64,10 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     private final SysUserMapper sysUserMapper;
     private final InventoryService inventoryService;
     private final DataScopeResolver dataScopeResolver;
+    private final WechatPaySimulator wechatPaySimulator;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final DateTimeFormatter PAY_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // ==================== 查询 ====================
 
@@ -175,7 +182,8 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             orderType = pkg.getPackageType();
             packageName = pkg.getPackageName();
             totalAmount = pkg.getOriginalPrice() == null ? BigDecimal.ZERO : pkg.getOriginalPrice();
-            payAmount = pkg.getDiscountPrice();
+            // 套餐未配置折扣价时按原价支付，避免 pay_amount 为空导致支付失败
+            payAmount = pkg.getDiscountPrice() == null ? totalAmount : pkg.getDiscountPrice();
         } else {
             totalAmount = BigDecimal.ZERO;
             for (OrderItemRequest item : request.getItems()) {
@@ -272,7 +280,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         return newOrderId;
     }
 
-    // ==================== 模拟支付 ====================
+    // ==================== 模拟支付（管理端/内部流程，同步完成） ====================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -281,6 +289,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         checkOrderAccess(order);
         if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
             throw new BusinessException("当前订单状态不允许支付");
+        }
+        if (order.getPayAmount() == null) {
+            throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
         }
         // 1. 扣减库存（每个明细），库存不足会抛异常并回滚
         List<OrderItem> items = getOrderItems(id);
@@ -302,6 +313,130 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         paymentRecordMapper.insert(record);
 
         // 3. 更新订单状态
+        markOrderPaid(order, transactionId);
+    }
+
+    // ==================== 微信支付（模拟）：预下单 + 回调处理 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public WechatPayParamsVO prepayOrder(Long id) {
+        OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
+        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
+            throw new BusinessException("当前订单状态不允许支付");
+        }
+        if (order.getPayAmount() == null) {
+            throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
+        }
+        // 1. 作废该订单历史待支付流水（重复发起支付场景）
+        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, id)
+                        .eq(PaymentRecord::getStatus, 1));
+        for (PaymentRecord pending : pendings) {
+            pending.setStatus(3);
+            pending.setRemark("重新发起支付，原待支付流水作废");
+            paymentRecordMapper.updateById(pending);
+        }
+
+        // 2. 调模拟微信统一下单，获取预支付凭证与调起参数
+        WechatPayParamsVO params = wechatPaySimulator.unifiedOrder(order);
+
+        // 3. 写待支付流水（回调成功后更新为已支付）
+        PaymentRecord record = new PaymentRecord();
+        record.setOrderId(order.getId());
+        record.setOrderNo(order.getOrderNo());
+        record.setAmount(order.getPayAmount());
+        record.setPayType(1);
+        record.setStatus(1);
+        record.setUserId(order.getUserId());
+        record.setRemark("微信支付（模拟）预下单，prepayId=" + params.getPrepayId());
+        paymentRecordMapper.insert(record);
+
+        return params;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean handleWechatPayNotify(WechatPayNotifyRequest notify) {
+        if (notify == null || !"SUCCESS".equals(notify.getResultCode())) {
+            log.warn("[模拟微信支付] 回调结果非 SUCCESS，忽略：{}", notify == null ? "null" : notify.getResultCode());
+            return false;
+        }
+        OrderInfo order = lambdaQuery().eq(OrderInfo::getOrderNo, notify.getOutTradeNo()).one();
+        if (order == null) {
+            log.warn("[模拟微信支付] 回调订单不存在：{}", notify.getOutTradeNo());
+            return false;
+        }
+        // 幂等：已支付及后续状态直接返回成功，避免重复扣库存/重复流水
+        if (OrderStatus.PAID.getCode().equals(order.getStatus())
+                || OrderStatus.DELIVERING.getCode().equals(order.getStatus())
+                || OrderStatus.COMPLETED.getCode().equals(order.getStatus())) {
+            log.info("[模拟微信支付] 订单 {} 状态已为 {}，回调幂等处理", order.getOrderNo(), order.getStatus());
+            return true;
+        }
+        // 订单已取消（如用户取消支付后回调才到达）：拒绝本轮回调，不将已取消订单置为已支付
+        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
+            log.warn("[模拟微信支付] 订单 {} 状态为 {}（已取消/非法），回调拒绝处理", order.getOrderNo(), order.getStatus());
+            return false;
+        }
+        // 金额核对：回调金额必须与订单应付金额一致
+        if (notify.getAmount() == null || order.getPayAmount() == null
+                || notify.getAmount().compareTo(order.getPayAmount()) != 0) {
+            log.warn("[模拟微信支付] 订单 {} 回调金额 {} 与应付金额 {} 不一致",
+                    order.getOrderNo(), notify.getAmount(), order.getPayAmount());
+            return false;
+        }
+        // 1. 扣减库存（每个明细），库存不足则本轮回调失败
+        List<OrderItem> items = orderItemMapper.selectList(
+                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
+        for (OrderItem item : items) {
+            inventoryService.deductForOrder(item.getProductId(), item.getQuantity(), order.getId());
+        }
+        // 2. 支付流水：更新预下单的待支付流水为成功，缺失时补建
+        PaymentRecord pending = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, order.getId())
+                        .eq(PaymentRecord::getStatus, 1)
+                        .orderByDesc(PaymentRecord::getId)
+                        .last("LIMIT 1"));
+        LocalDateTime payTime;
+        try {
+            payTime = StringUtils.hasText(notify.getPayTime())
+                    ? LocalDateTime.parse(notify.getPayTime(), PAY_TIME_FMT)
+                    : LocalDateTime.now();
+        } catch (Exception e) {
+            log.warn("[模拟微信支付] 回调支付时间格式非法：{}，按当前时间处理", notify.getPayTime());
+            payTime = LocalDateTime.now();
+        }
+        if (pending != null) {
+            pending.setStatus(2);
+            pending.setTransactionId(notify.getTransactionId());
+            pending.setPayTime(payTime);
+            pending.setRemark("微信支付（模拟）回调成功");
+            paymentRecordMapper.updateById(pending);
+        } else {
+            PaymentRecord record = new PaymentRecord();
+            record.setOrderId(order.getId());
+            record.setOrderNo(order.getOrderNo());
+            record.setTransactionId(notify.getTransactionId());
+            record.setAmount(notify.getAmount());
+            record.setPayType(1);
+            record.setStatus(2);
+            record.setPayTime(payTime);
+            record.setUserId(order.getUserId());
+            record.setRemark("微信支付（模拟）回调成功（无预下单流水，补建）");
+            paymentRecordMapper.insert(record);
+        }
+        // 3. 更新订单状态
+        markOrderPaid(order, notify.getTransactionId());
+        log.info("[模拟微信支付] 订单 {} 支付成功，流水号 {}", order.getOrderNo(), notify.getTransactionId());
+        return true;
+    }
+
+    /** 订单置为已支付（统一出口，供同步模拟支付与微信回调共用） */
+    private void markOrderPaid(OrderInfo order, String transactionId) {
         order.setStatus(OrderStatus.PAID.getCode());
         order.setPayTime(LocalDateTime.now());
         order.setPayType(1);
@@ -327,6 +462,16 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             for (OrderItem item : items) {
                 inventoryService.restoreForOrder(item.getProductId(), item.getQuantity(), id);
             }
+        }
+        // 作废待支付流水（微信预下单后未支付即取消的场景），防止残留悬挂的待支付记录
+        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, id)
+                        .eq(PaymentRecord::getStatus, 1));
+        for (PaymentRecord pending : pendings) {
+            pending.setStatus(3);
+            pending.setRemark("订单取消，待支付流水作废");
+            paymentRecordMapper.updateById(pending);
         }
         order.setStatus(OrderStatus.CANCELLED.getCode());
         order.setCancelTime(LocalDateTime.now());

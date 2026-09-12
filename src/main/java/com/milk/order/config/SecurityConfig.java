@@ -47,6 +47,8 @@ public class SecurityConfig {
                 .antMatchers("/api/auth/login", "/api/auth/register",
                         "/api/auth/wx-login", "/api/auth/wx-bind",
                         "/api/auth/bind-student/search").permitAll()
+                // 微信支付回调（无 JWT 登录态，可信性由验签保证）与模拟微信支付侧接口（仅本地模拟）
+                .antMatchers("/api/pay/wechat/notify", "/api/mock/wechat/**").permitAll()
                 .antMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 // 用户与系统管理：仅管理员
                 .antMatchers("/api/user/**", "/api/system/**").hasRole("ADMIN")
@@ -59,6 +61,8 @@ public class SecurityConfig {
                 // 配送任务与签收/拒收：仅管理端角色（家长仅读取配送记录）
                 .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER")
                 .antMatchers(HttpMethod.POST, "/api/delivery/record/**").hasAnyRole("ADMIN", "TEACHER")
+                // 订单状态机写操作：开始配送/完成订单仅管理端角色，家长不可代跑配送流程
+                .antMatchers(HttpMethod.PUT, "/api/order/deliver/**", "/api/order/complete/**").hasAnyRole("ADMIN", "TEACHER")
                 // 其余接口需认证：订单、续订等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()

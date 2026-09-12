@@ -3,9 +3,11 @@ package com.milk.order.module.order.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.milk.order.module.order.dto.CreateOrderRequest;
+import com.milk.order.module.order.dto.WechatPayNotifyRequest;
 import com.milk.order.module.order.entity.OrderInfo;
 import com.milk.order.module.order.entity.OrderItem;
 import com.milk.order.module.order.vo.OrderVO;
+import com.milk.order.module.order.vo.WechatPayParamsVO;
 
 import java.util.List;
 
@@ -24,8 +26,14 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 续订订单：复制原订单明细，生成新配送周期的订单并自动支付，返回新订单ID */
     Long renewOrder(Long originalOrderId);
 
-    /** 模拟支付（同事务：写支付记录 + 订单改已支付 + 扣减库存） */
+    /** 模拟支付（同事务：写支付记录 + 订单改已支付 + 扣减库存），供管理端与续订内部流程使用 */
     void payOrder(Long id);
+
+    /** 发起微信支付（模拟）：作废旧待支付流水、生成预支付单与前端调起参数，写入待支付流水 */
+    WechatPayParamsVO prepayOrder(Long id);
+
+    /** 处理微信支付回调通知（验签后调用）：校验金额、扣库存、更新支付流水与订单状态，幂等 */
+    boolean handleWechatPayNotify(WechatPayNotifyRequest notify);
 
     /** 退订（待支付/已支付可退；已支付的退订回库） */
     void cancelOrder(Long id, String reason);

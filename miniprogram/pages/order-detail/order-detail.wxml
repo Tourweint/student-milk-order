@@ -61,7 +61,10 @@
 
   <!-- 操作 -->
   <view class="actions" wx:if="{{order.status === 1 || order.status === 2}}">
-    <button wx:if="{{order.status === 1}}" class="btn-primary action-btn" bindtap="handlePay" loading="{{paying}}">去支付</button>
+    <block wx:if="{{order.status === 1}}">
+      <button class="btn-ghost action-btn" bindtap="handleCancel">取消支付</button>
+      <button class="btn-primary action-btn" bindtap="handlePay" loading="{{paying}}">去支付</button>
+    </block>
     <button wx:if="{{order.status === 2}}" class="btn-ghost action-btn" bindtap="handleCancel">退订</button>
   </view>
 </view>

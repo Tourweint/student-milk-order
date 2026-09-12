@@ -1,0 +1,35 @@
+<view class="container" wx:if="{{items.length}}">
+  <!-- 奶品清单 -->
+  <view class="card">
+    <view class="card-title">已选奶品（{{count}} 盒）</view>
+    <view class="line-item" wx:for="{{items}}" wx:key="productId">
+      <view class="line-info">
+        <view class="line-name">{{item.name}}</view>
+        <view class="line-meta">{{item.spec || ''}} · ¥{{item.price}}/盒</view>
+      </view>
+      <view class="stepper">
+        <view class="stepper-btn" bindtap="decrease" data-id="{{item.productId}}">−</view>
+        <view class="stepper-num">{{item.quantity}}</view>
+        <view class="stepper-btn stepper-btn-active" bindtap="increase" data-id="{{item.productId}}">＋</view>
+      </view>
+      <view class="remove-btn" bindtap="removeItem" data-id="{{item.productId}}">删除</view>
+    </view>
+  </view>
+
+  <view class="cart-tip">数量指每日配送盒数，提交后按所选周期配送</view>
+
+  <!-- 底部结算栏 -->
+  <view class="footer-bar">
+    <view class="footer-price">
+      <text class="text-price">¥{{total}}</text>
+      <text class="text-muted footer-unit">合计</text>
+    </view>
+    <button class="btn-primary footer-btn" bindtap="goSettle">去结算（{{count}} 盒）</button>
+  </view>
+</view>
+
+<view wx:else class="empty-wrap">
+  <view class="empty-icon">🥛</view>
+  <view class="empty-text">购物车还是空的</view>
+  <button class="btn-primary empty-btn" bindtap="goHome">去挑选奶品</button>
+</view>

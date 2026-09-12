@@ -33,7 +33,10 @@
       <view class="order-foot">
         <text class="order-time">下单 {{item.createTime}}</text>
         <view class="order-actions">
-          <view wx:if="{{item.status === 1}}" class="action-btn action-primary" catchtap="handlePay" data-id="{{item.id}}">去支付</view>
+          <block wx:if="{{item.status === 1}}">
+            <view class="action-btn" catchtap="handleCancel" data-id="{{item.id}}">取消支付</view>
+            <view class="action-btn action-primary" catchtap="handlePay" data-id="{{item.id}}">去支付</view>
+          </block>
           <view wx:if="{{item.status === 2}}" class="action-btn" catchtap="handleCancel" data-id="{{item.id}}">退订</view>
         </view>
       </view>

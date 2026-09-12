@@ -14,7 +14,9 @@ import com.milk.order.module.clazz.mapper.StudentMapper;
 import com.milk.order.module.clazz.service.ClassInfoService;
 import com.milk.order.module.clazz.service.GradeService;
 import com.milk.order.module.clazz.vo.ClassVO;
+import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.entity.SysUser;
+import com.milk.order.module.user.service.DataScopeResolver;
 import com.milk.order.module.user.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,8 @@ public class ClassInfoServiceImpl extends ServiceImpl<ClassInfoMapper, ClassInfo
     private final SysUserService sysUserService;
     /** 删除班级前用它统计学生数，避免与 StudentService 循环依赖 */
     private final StudentMapper studentMapper;
+    /** 班级列表/下拉数据权限：班主任仅本班，管理员不限 */
+    private final DataScopeResolver dataScopeResolver;
 
     @Override
     public IPage<ClassVO> pageClasses(Long pageNum, Long pageSize, Long gradeId) {
@@ -45,8 +49,10 @@ public class ClassInfoServiceImpl extends ServiceImpl<ClassInfoMapper, ClassInfo
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
 
+        DataScope scope = dataScopeResolver.resolve();
         IPage<ClassInfo> classPage = lambdaQuery()
                 .eq(gradeId != null, ClassInfo::getGradeId, gradeId)
+                .eq(scope.getClassId() != null, ClassInfo::getId, scope.getClassId())
                 .orderByAsc(ClassInfo::getGradeId)
                 .orderByAsc(ClassInfo::getId)
                 .page(page);
@@ -60,7 +66,10 @@ public class ClassInfoServiceImpl extends ServiceImpl<ClassInfoMapper, ClassInfo
 
     @Override
     public List<ClassVO> listAll() {
+        // 数据权限：班主任下拉仅返回本班，管理员返回全部
+        DataScope scope = dataScopeResolver.resolve();
         List<ClassInfo> classes = lambdaQuery()
+                .eq(scope.getClassId() != null, ClassInfo::getId, scope.getClassId())
                 .orderByAsc(ClassInfo::getGradeId)
                 .orderByAsc(ClassInfo::getId)
                 .list();

@@ -302,8 +302,8 @@ INSERT INTO meal_package_item (package_id, product_id, quantity) VALUES
 -- ============================================================
 INSERT INTO order_info (id, order_no, student_id, user_id, class_id, package_id, order_type, status, total_amount, pay_amount, discount_amount, delivery_start_date, delivery_end_date, pay_time, pay_type, transaction_id, cancel_time, cancel_reason, remark) VALUES
 -- 待支付订单
-(1,  'ORD20260901001', 1,  7,  1, 1, 1, 1, 98.00,  NULL,   7.00,  '2026-09-01', '2026-09-30', NULL, NULL, NULL, NULL, NULL, '待支付测试'),
-(2,  'ORD20260901002', 3,  9,  2, 2, 1, 1, 112.00, NULL,   8.00,  '2026-09-01', '2026-09-30', NULL, NULL, NULL, NULL, NULL, '待支付测试'),
+(1,  'ORD20260901001', 1,  7,  1, 1, 1, 1, 98.00,  98.00,  7.00,  '2026-09-01', '2026-09-30', NULL, NULL, NULL, NULL, NULL, '待支付测试'),
+(2,  'ORD20260901002', 3,  9,  2, 2, 1, 1, 112.00, 112.00, 8.00,  '2026-09-01', '2026-09-30', NULL, NULL, NULL, NULL, NULL, '待支付测试'),
 -- 已支付订单（刚支付，待配送）
 (3,  'ORD20260901003', 2,  8,  1, 1, 1, 2, 98.00,  98.00,  7.00,  '2026-09-01', '2026-09-30', '2026-08-30 10:15:00', 1, 'TX20260830001', NULL, NULL, '已支付待配送'),
 (4,  'ORD20260901004', 4,  10, 2, 3, 1, 2, 105.00, 105.00, 7.50,  '2026-09-01', '2026-09-30', '2026-08-31 14:20:00', 1, 'TX20260831001', NULL, NULL, '已支付待配送'),

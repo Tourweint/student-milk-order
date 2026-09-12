@@ -3,6 +3,7 @@
  */
 const auth = require('../../utils/auth')
 const orderApi = require('../../api/order')
+const pay = require('../../utils/pay')
 
 Page({
   data: {
@@ -38,30 +39,37 @@ Page({
   async handlePay() {
     if (this.data.paying) return
     this.setData({ paying: true })
-    wx.showLoading({ title: '支付中' })
     try {
-      await orderApi.payOrder(this.orderId)
-      wx.hideLoading()
-      wx.showToast({ title: '支付成功', icon: 'success' })
-      this.loadDetail()
+      const result = await pay.requestWechatPay(this.orderId)
+      if (result.paid) {
+        wx.showToast({ title: '支付成功', icon: 'success' })
+        this.loadDetail()
+      } else {
+        wx.showToast({ title: result.message, icon: 'none' })
+      }
     } catch (e) {
-      wx.hideLoading()
+      // 预下单失败等业务错误已由 request.js 统一提示
+      console.error('发起支付失败', e)
     } finally {
       this.setData({ paying: false })
     }
   },
 
+  /** 取消支付（待支付）/ 退订（已支付）：均走 cancelOrder，按状态区分文案 */
   handleCancel() {
+    const paid = this.data.order && this.data.order.status === 2
     wx.showModal({
-      title: '确认退订',
-      content: '退订后已支付金额将退回（模拟），确认退订该订单？',
+      title: paid ? '确认退订' : '取消支付',
+      content: paid
+        ? '退订后已支付金额将退回（模拟），确认退订该订单？'
+        : '订单尚未支付，取消后订单将作废，确认取消支付？',
       success: async (res) => {
         if (!res.confirm) return
-        wx.showLoading({ title: '退订中' })
+        wx.showLoading({ title: paid ? '退订中' : '取消中' })
         try {
-          await orderApi.cancelOrder(this.orderId, '用户申请退订')
+          await orderApi.cancelOrder(this.orderId, paid ? '用户申请退订' : '用户取消支付')
           wx.hideLoading()
-          wx.showToast({ title: '已退订', icon: 'success' })
+          wx.showToast({ title: paid ? '已退订' : '已取消', icon: 'success' })
           this.loadDetail()
         } catch (e) {
           wx.hideLoading()
