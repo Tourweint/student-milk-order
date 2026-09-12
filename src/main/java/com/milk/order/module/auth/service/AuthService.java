@@ -5,7 +5,10 @@ import com.milk.order.module.auth.dto.RegisterRequest;
 import com.milk.order.module.auth.dto.WxBindRequest;
 import com.milk.order.module.auth.dto.WxLoginRequest;
 import com.milk.order.module.auth.vo.LoginResponse;
+import com.milk.order.module.auth.vo.StudentBindVO;
 import com.milk.order.module.auth.vo.WxLoginVO;
+
+import java.util.List;
 
 public interface AuthService {
 
@@ -33,4 +36,9 @@ public interface AuthService {
      * 微信绑定：绑定已有账号或自动创建家长账号，返回登录结果
      */
     WxLoginVO wxBind(WxBindRequest request);
+
+    /**
+     * 绑定流程学生搜索（免认证）：按学号/姓名关键词返回学生最小信息，最多 10 条
+     */
+    List<StudentBindVO> searchBindStudents(String keyword);
 }

@@ -1,6 +1,6 @@
 /* 全局样式入口 */
-@import './reset.scss';
-@import './variables.scss';
+@use './reset.scss';
+@use './variables.scss';
 
 html, body, #app {
   width: 100%;

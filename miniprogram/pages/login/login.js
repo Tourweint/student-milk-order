@@ -89,7 +89,7 @@ Page({
     wx.showLoading({ title: '搜索中' })
     try {
       const res = await studentApi.searchStudents(studentNo)
-      this.setData({ studentList: res.list || [], searched: true })
+      this.setData({ studentList: res || [], searched: true })
     } catch (e) {
       console.error('搜索学生失败', e)
     } finally {
@@ -100,9 +100,20 @@ Page({
   selectStudent(e) {
     const id = e.currentTarget.dataset.id
     const item = this.data.studentList.find((s) => s.id === id)
-    if (item) {
-      this.setData({ selectedStudent: item })
-    }
+    if (!item) return
+    // 选中前二次确认，防止学号相近时点错孩子
+    const content = item.parentName
+      ? '学生：' + item.studentName + '（' + item.className + '）\n系统登记家长：' + item.parentName
+      : '学生：' + item.studentName + '（' + item.className + '）\n系统未登记家长姓名，请自行核对'
+    wx.showModal({
+      title: '确认是您的孩子吗',
+      content,
+      confirmText: '确认',
+      cancelText: '再想想',
+      success: (res) => {
+        this.setData({ selectedStudent: res.confirm ? item : null })
+      }
+    })
   },
 
   async handleBind() {

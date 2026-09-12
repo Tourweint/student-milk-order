@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.milk.order.common.constant.SystemConstants;
 import com.milk.order.exception.BusinessException;
+import com.milk.order.module.user.dto.DataScope;
+import com.milk.order.module.user.service.DataScopeResolver;
 import com.milk.order.module.clazz.entity.ClassInfo;
 import com.milk.order.module.clazz.entity.Student;
 import com.milk.order.module.clazz.mapper.StudentMapper;
@@ -30,15 +32,23 @@ import java.util.stream.Collectors;
 public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> implements StudentService {
 
     private final ClassInfoService classInfoService;
+    private final DataScopeResolver dataScopeResolver;
 
     @Override
     public IPage<StudentVO> pageStudents(Long pageNum, Long pageSize, Long classId, String keyword) {
+        // 数据权限：家长仅看自己绑定的学生，班主任仅看本班，管理员不限
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getClassId() != null) {
+            classId = scope.getClassId();
+        }
+
         Page<Student> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
 
         IPage<Student> studentPage = lambdaQuery()
                 .eq(classId != null, Student::getClassId, classId)
+                .eq(scope.getStudentId() != null, Student::getId, scope.getStudentId())
                 .and(StringUtils.hasText(keyword), wrapper -> wrapper
                         .like(Student::getStudentNo, keyword)
                         .or().like(Student::getStudentName, keyword)
@@ -56,8 +66,19 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
     }
 
     @Override
+    public Student getStudentDetail(Long id) {
+        Student student = getById(id);
+        if (student == null) {
+            throw new BusinessException("学生不存在");
+        }
+        checkStudentAccess(student);
+        return student;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public void createStudent(Student student) {
+        checkManageScope(student.getClassId());
         validateStudent(student, null);
         save(student);
         classInfoService.refreshStudentCount(student.getClassId());
@@ -72,6 +93,11 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
         Student exists = getById(student.getId());
         if (exists == null) {
             throw new BusinessException("学生不存在");
+        }
+        checkManageScope(exists.getClassId());
+        // 班主任不允许把学生移出本班；管理员可换班
+        if (student.getClassId() != null && !Objects.equals(student.getClassId(), exists.getClassId())) {
+            checkManageScope(student.getClassId());
         }
         validateStudent(student, student.getId());
         updateById(student);
@@ -89,6 +115,7 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
         if (exists == null) {
             throw new BusinessException("学生不存在");
         }
+        checkManageScope(exists.getClassId());
         removeById(id);
         classInfoService.refreshStudentCount(exists.getClassId());
     }
@@ -103,6 +130,7 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
         if (clazz == null) {
             throw new BusinessException("所选班级不存在");
         }
+        checkManageScope(classId);
         if (file == null || file.isEmpty()) {
             throw new BusinessException("请上传 Excel 文件");
         }
@@ -215,6 +243,45 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
             }
             workbook.write(out);
             return out.toByteArray();
+        }
+    }
+
+    /**
+     * 校验当前用户是否有权查看该学生：
+     * 家长仅能查看自己绑定的学生，班主任仅能查看本班学生；
+     * 管理员与无登录上下文的内部流程不限制。
+     */
+    private void checkStudentAccess(Student student) {
+        DataScope scope = dataScopeResolver.resolveQuietly();
+        if (scope.isAll()) {
+            return;
+        }
+        if (scope.getStudentId() != null) {
+            if (!scope.getStudentId().equals(student.getId())) {
+                throw new BusinessException(403, "无权访问该学生");
+            }
+        } else if (scope.getClassId() != null) {
+            if (!scope.getClassId().equals(student.getClassId())) {
+                throw new BusinessException(403, "无权访问该学生");
+            }
+        }
+    }
+
+    /**
+     * 校验当前用户是否有权管理学生：
+     * 家长不可管理学生，班主任仅能管理本班学生；
+     * 管理员与无登录上下文的内部流程不限制。
+     */
+    private void checkManageScope(Long studentClassId) {
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.isAll()) {
+            return;
+        }
+        if (scope.getStudentId() != null) {
+            throw new BusinessException(403, "家长无权管理学生");
+        }
+        if (!scope.getClassId().equals(studentClassId)) {
+            throw new BusinessException(403, "只能管理本班学生");
         }
     }
 

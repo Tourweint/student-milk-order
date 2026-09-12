@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getToken } from '@/utils/auth'
+import { useUserStore } from '@/stores/user'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -96,11 +98,23 @@ router.beforeEach((to, from, next) => {
 
   if (requiresAuth && !token) {
     next({ path: '/login', query: { redirect: to.fullPath } })
-  } else if (to.path === '/login' && token) {
-    next({ path: '/' })
-  } else {
-    next()
+    return
   }
+  if (to.path === '/login' && token) {
+    next({ path: '/' })
+    return
+  }
+  // 角色校验：meta.roles 配置了允许角色时，当前用户至少需拥有其一
+  const requiredRoles = to.meta.roles as string[] | undefined
+  if (requiredRoles?.length) {
+    const roles = useUserStore().roles
+    if (!roles.some((r) => requiredRoles.includes(r))) {
+      ElMessage.error('无权访问该页面')
+      next({ path: '/dashboard' })
+      return
+    }
+  }
+  next()
 })
 
 router.afterEach((to) => {

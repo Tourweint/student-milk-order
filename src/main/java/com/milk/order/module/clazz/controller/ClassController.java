@@ -150,7 +150,7 @@ public class ClassController {
 
     @GetMapping("/student/{id}")
     public ApiResponse<Student> getStudentById(@PathVariable Long id) {
-        return ApiResponse.success(studentService.getById(id));
+        return ApiResponse.success(studentService.getStudentDetail(id));
     }
 
     @PostMapping("/student")

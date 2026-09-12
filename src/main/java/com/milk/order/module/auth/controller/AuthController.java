@@ -7,11 +7,13 @@ import com.milk.order.module.auth.dto.WxBindRequest;
 import com.milk.order.module.auth.dto.WxLoginRequest;
 import com.milk.order.module.auth.service.AuthService;
 import com.milk.order.module.auth.vo.LoginResponse;
+import com.milk.order.module.auth.vo.StudentBindVO;
 import com.milk.order.module.auth.vo.WxLoginVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
 
 /**
  * 认证控制器（登录/注册/微信登录/当前用户）
@@ -21,6 +23,7 @@ import javax.validation.Valid;
  * - POST /api/auth/register  注册
  * - POST /api/auth/wx-login  微信登录（code 换 openid，已绑定直接登录）
  * - POST /api/auth/wx-bind   微信绑定（绑定已有账号或自动创建家长账号）
+ * - GET  /api/auth/bind-student/search 绑定流程学生搜索（免认证，仅最小信息）
  * - GET  /api/auth/me        获取当前登录用户信息
  */
 @RestController
@@ -61,6 +64,15 @@ public class AuthController {
     @PostMapping("/wx-bind")
     public ApiResponse<WxLoginVO> wxBind(@Valid @RequestBody WxBindRequest request) {
         return ApiResponse.success(authService.wxBind(request));
+    }
+
+    /**
+     * 绑定流程学生搜索：wx-bind 前用户尚未登录，此接口免认证；
+     * 仅返回 id/学号/姓名/班级，供小程序绑定家长时选择孩子
+     */
+    @GetMapping("/bind-student/search")
+    public ApiResponse<List<StudentBindVO>> searchBindStudent(@RequestParam String keyword) {
+        return ApiResponse.success(authService.searchBindStudents(keyword));
     }
 
     /**

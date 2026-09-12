@@ -45,9 +45,21 @@ public class SecurityConfig {
                 .authorizeRequests()
                 // 公开接口
                 .antMatchers("/api/auth/login", "/api/auth/register",
-                        "/api/auth/wx-login", "/api/auth/wx-bind").permitAll()
+                        "/api/auth/wx-login", "/api/auth/wx-bind",
+                        "/api/auth/bind-student/search").permitAll()
                 .antMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                // 其他接口需要认证
+                // 用户与系统管理：仅管理员
+                .antMatchers("/api/user/**", "/api/system/**").hasRole("ADMIN")
+                // 奶品、营养信息的写操作仅管理员（小程序家长需要 GET 读取奶品与营养信息）
+                .antMatchers(HttpMethod.POST, "/api/product/**", "/api/nutrition/**").hasRole("ADMIN")
+                .antMatchers(HttpMethod.PUT, "/api/product/**", "/api/nutrition/**").hasRole("ADMIN")
+                .antMatchers(HttpMethod.DELETE, "/api/product/**", "/api/nutrition/**").hasRole("ADMIN")
+                // 班级与学生管理、统计看板：Web 管理端角色
+                .antMatchers("/api/clazz/**", "/api/stats/**").hasAnyRole("ADMIN", "TEACHER")
+                // 配送任务与签收/拒收：仅管理端角色（家长仅读取配送记录）
+                .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER")
+                .antMatchers(HttpMethod.POST, "/api/delivery/record/**").hasAnyRole("ADMIN", "TEACHER")
+                // 其余接口需认证：订单、续订等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()
                 .exceptionHandling()

@@ -15,7 +15,7 @@
         text-color="#bfcbd9"
         active-text-color="#409eff"
       >
-        <el-menu-item v-for="item in menuList" :key="item.path" :index="item.path">
+        <el-menu-item v-for="item in visibleMenus" :key="item.path" :index="item.path">
           <el-icon><component :is="item.icon" /></el-icon>
           <template #title>{{ item.title }}</template>
         </el-menu-item>
@@ -77,18 +77,24 @@ const userStore = useUserStore()
 
 const isCollapse = ref(false)
 
-const menuList = [
+const menuList: { path: string; title: string; icon: string; roles?: string[] }[] = [
   { path: '/dashboard', title: '数据看板', icon: 'DataAnalysis' },
-  { path: '/user', title: '用户管理', icon: 'User' },
+  { path: '/user', title: '用户管理', icon: 'User', roles: ['ADMIN'] },
   { path: '/clazz', title: '班级管理', icon: 'OfficeBuilding' },
   { path: '/student', title: '学生管理', icon: 'Avatar' },
-  { path: '/product', title: '奶品管理', icon: 'Goods' },
+  { path: '/product', title: '奶品管理', icon: 'Goods', roles: ['ADMIN'] },
   { path: '/order', title: '订单管理', icon: 'List' },
   { path: '/delivery', title: '配送管理', icon: 'Van' },
   { path: '/nutrition', title: '营养统计', icon: 'Histogram' },
-  { path: '/subscription', title: '自动续订', icon: 'RefreshRight' },
-  { path: '/system', title: '系统管理', icon: 'Setting' }
+  { path: '/subscription', title: '自动续订', icon: 'RefreshRight', roles: ['ADMIN'] },
+  { path: '/system', title: '系统管理', icon: 'Setting', roles: ['ADMIN'] }
 ]
+
+// 按当前用户角色过滤菜单，roles 未配置的菜单对所有登录角色可见
+const visibleMenus = computed(() => {
+  const roles = userStore.roles
+  return menuList.filter((m) => !m.roles || m.roles.some((r) => roles.includes(r)))
+})
 
 const activeMenu = computed(() => route.path)
 const currentTitle = computed(() => route.meta.title as string)

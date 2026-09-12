@@ -9,10 +9,13 @@ import com.milk.order.module.auth.dto.WxBindRequest;
 import com.milk.order.module.auth.dto.WxLoginRequest;
 import com.milk.order.module.auth.service.AuthService;
 import com.milk.order.module.auth.vo.LoginResponse;
+import com.milk.order.module.auth.vo.StudentBindVO;
 import com.milk.order.module.auth.vo.WxLoginVO;
 import com.milk.order.module.auth.vo.WxSessionVO;
 import com.milk.order.module.clazz.entity.Student;
 import com.milk.order.module.clazz.mapper.StudentMapper;
+import com.milk.order.module.clazz.service.StudentService;
+import com.milk.order.module.clazz.vo.StudentVO;
 import com.milk.order.module.user.entity.SysRole;
 import com.milk.order.module.user.entity.SysUser;
 import com.milk.order.module.user.entity.SysUserRole;
@@ -48,6 +51,7 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final StudentMapper studentMapper;
+    private final StudentService studentService;
 
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -75,6 +79,13 @@ public class AuthServiceImpl implements AuthService {
 
         // 3. 查询角色
         List<String> roles = sysUserRoleService.getRoleCodesByUserId(user.getId());
+
+        // Web 管理端仅面向教职工：纯家长账号（不含教师/管理员角色）不允许账号密码登录，走小程序
+        if (roles.contains(RoleType.PARENT.getCode())
+                && roles.stream().noneMatch(r -> RoleType.ADMIN.getCode().equals(r) || RoleType.TEACHER.getCode().equals(r))) {
+            log.warn("家长账号 [{}] 尝试从 Web 端登录，已拒绝", user.getUsername());
+            throw new BusinessException(403, "家长账号请通过微信小程序登录");
+        }
 
         // 4. 生成 Token
         String token = jwtTokenProvider.generateToken(user.getId(), user.getUsername(), roles);
@@ -227,14 +238,14 @@ public class AuthServiceImpl implements AuthService {
             if (!StringUtils.hasText(request.getRealName())) {
                 throw new BusinessException("请填写家长姓名");
             }
-            checkStudentExists(request.getStudentId());
+            Student student = getStudentForBind(request.getStudentId(), request.getRealName());
             String username = generateWxUsername(openid);
             user = new SysUser();
             user.setUsername(username);
             user.setPassword(passwordEncoder.encode(randomPassword()));
             user.setRealName(request.getRealName());
             user.setPhone(request.getPhone());
-            user.setStudentId(request.getStudentId());
+            user.setStudentId(student.getId());
             user.setOpenid(openid);
             user.setStatus(1);
             sysUserService.save(user);
@@ -311,7 +322,10 @@ public class AuthServiceImpl implements AuthService {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     }
 
-    private void checkStudentExists(Long studentId) {
+    /**
+     * 绑定前校验学生存在，且家长姓名与系统登记一致（系统未登记家长姓名时放行）
+     */
+    private Student getStudentForBind(Long studentId, String realName) {
         if (studentId == null) {
             throw new BusinessException("请选择关联的学生");
         }
@@ -319,5 +333,23 @@ public class AuthServiceImpl implements AuthService {
         if (student == null) {
             throw new BusinessException("关联的学生不存在");
         }
+        String filled = realName == null ? "" : realName.trim();
+        if (StringUtils.hasText(student.getParentName())
+                && !student.getParentName().trim().equals(filled)) {
+            throw new BusinessException("填写的家长姓名与学生在系统中的登记不符，请核对学号与姓名");
+        }
+        return student;
+    }
+
+    @Override
+    public List<StudentBindVO> searchBindStudents(String keyword) {
+        if (!StringUtils.hasText(keyword)) {
+            throw new BusinessException("请输入学号或姓名搜索");
+        }
+        // 绑定流程未登录，复用学生分页查询取第一页，仅返回最小信息
+        return studentService.pageStudents(1L, 10L, null, keyword.trim())
+                .getRecords().stream()
+                .map(StudentBindVO::from)
+                .collect(java.util.stream.Collectors.toList());
     }
 }

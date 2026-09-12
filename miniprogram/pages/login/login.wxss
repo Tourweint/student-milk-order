@@ -54,7 +54,9 @@
   color: #ffffff;
   font-size: 26rpx;
   border-radius: 10rpx;
-  padding: 16rpx 28rpx;
+  padding: 0 28rpx;
+  height: 88rpx;
+  line-height: 88rpx;
   white-space: nowrap;
 }
 
@@ -79,6 +81,12 @@
   font-size: 28rpx;
   font-weight: 600;
   color: #1f2d3d;
+}
+
+.parent-name {
+  font-size: 24rpx;
+  font-weight: 400;
+  color: #606266;
 }
 
 .bind-btn {
