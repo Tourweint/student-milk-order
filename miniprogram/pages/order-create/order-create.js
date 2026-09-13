@@ -162,14 +162,21 @@ Page({
     this.loadQuotaRemaining()
   },
 
-  /** 散订模式：查询所选日期的机动配额余量 */
+  /** 散订模式：查询所选日期各品种机动配额余量（quotaMap 供明细逐行展示，quotaText 供汇总行） */
   async loadQuotaRemaining() {
     if (this.mode === 'package' || !this.data.startDate) return
     try {
-      const remaining = await productApi.getQuotaRemaining(this.data.startDate)
-      this.setData({ quotaRemaining: remaining == null ? null : Number(remaining) })
+      const rows = (await productApi.getQuotaRemainingList(this.data.startDate)) || []
+      const quotaMap = {}
+      rows.forEach((it) => { quotaMap[it.productId] = Number(it.remaining) || 0 })
+      let quotaText = '按品种余量见下方明细'
+      if (this.mode === 'product' && this.data.items.length > 0) {
+        const r = quotaMap[this.data.items[0].productId]
+        quotaText = r == null ? '该品种当日未设配额，卖完即止' : '剩 ' + r + ' 盒'
+      }
+      this.setData({ quotaMap: quotaMap, quotaText: quotaText })
     } catch (e) {
-      this.setData({ quotaRemaining: null })
+      this.setData({ quotaMap: {}, quotaText: '—' })
     }
   },
 

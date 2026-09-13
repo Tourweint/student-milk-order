@@ -24,7 +24,7 @@ function getPackageDetail(id) {
 }
 
 /** 某日各品种剩余机动配额（[{productId, remaining}]） */
-function getQuotaRemainingListList(date) {
+function getQuotaRemainingList(date) {
   return get('/product/quota/remaining/list', { date })
 }
 
