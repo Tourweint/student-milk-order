@@ -79,8 +79,8 @@ public class StatsServiceImpl implements StatsService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         vo.setMonthlySales(monthlySales);
 
-        // 今日机动配额剩余（仅单日零散订购占用）
-        vo.setTodayQuotaRemaining((long) dailyQuotaService.remaining(java.time.LocalDate.now()));
+        // 今日机动余量（全部品种合计，仅单日零散订购占用）
+        vo.setTodayQuotaRemaining((long) dailyQuotaService.totalRemaining(java.time.LocalDate.now()));
 
         return vo;
     }

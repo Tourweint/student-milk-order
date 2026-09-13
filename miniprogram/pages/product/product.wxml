@@ -12,7 +12,7 @@
       <text class="price-num">{{product.price}}</text>
       <text class="price-unit">/盒</text>
     </view>
-    <view class="hero-stock">单日零散订购受每日机动配额限制，卖完即止</view>
+    <view class="hero-stock">零散订购数量受当日剩余库存限制，卖完即止</view>
   </view>
 
   <!-- 商品信息 -->

@@ -38,7 +38,9 @@ Page({
     total: 0,
     startDate: '',
     endDate: '',
-    quotaRemaining: null,
+    quotaMap: {},
+    quotaText: "—",
+    totalBoxes: 0,
     remark: '',
     submitting: false
   },
@@ -79,7 +81,7 @@ Page({
       if (this.mode === 'product') {
         const p = await productApi.getProductDetail(this.targetId)
         items = [{ productId: p.id, name: p.productName, spec: p.spec, price: p.price, quantity: this.initQty }]
-        this.setData({ product: p, student: me, items, total: this.calcTotal(items) })
+        this.setData({ product: p, student: me, items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
       } else if (this.mode === 'cart') {
         items = cart.getItems()
         if (!items.length) {
@@ -87,7 +89,7 @@ Page({
           setTimeout(() => wx.navigateBack(), 600)
           return
         }
-        this.setData({ student: me, items, total: this.calcTotal(items) })
+        this.setData({ student: me, items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
       } else {
         // 套餐内容固定（服务端配置为准），家长不可自选奶品
         const pkg = await productApi.getPackageDetail(this.targetId)
@@ -128,7 +130,7 @@ Page({
     const index = Number(e.currentTarget.dataset.index)
     const items = this.data.items.slice()
     items[index].quantity += 1
-    this.setData({ items, total: this.calcTotal(items) })
+    this.setData({ items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
   },
 
   decrease(e) {
@@ -137,12 +139,18 @@ Page({
     const items = this.data.items.slice()
     if (items[index].quantity > 1) {
       items[index].quantity -= 1
-      this.setData({ items, total: this.calcTotal(items) })
+      this.setData({ items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
     } else if (this.data.mode === 'cart') {
       // 购物车模式：减到 0 表示移除该奶品（提交时过滤）
       items[index].quantity = 0
-      this.setData({ items, total: this.calcTotal(items) })
+      this.setData({ items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
     }
+  },
+
+  /** 本次订购总盒数（散订占用的当日剩余库存） */
+  calcTotalBoxes(items) {
+    items = items || this.data.items
+    return items.reduce((sum, x) => sum + (x.quantity > 0 ? x.quantity : 0), 0)
   },
 
   // ==================== 日期 ====================

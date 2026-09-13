@@ -13,11 +13,15 @@
       </picker>
     </view>
     <view class="row" wx:if="{{mode !== 'package'}}">
-      <text class="row-label">当日机动余量</text>
-      <text class="row-value {{quotaRemaining === 0 ? 'text-price' : ''}}">{{quotaRemaining === null ? '—' : quotaRemaining}} 盒</text>
+      <text class="row-label">剩余库存量</text>
+      <text class="row-value">{{quotaText}}</text>
+    </view>
+    <view class="row" wx:if="{{mode !== 'package' && totalBoxes > 0}}">
+      <text class="row-label">本次订购</text>
+      <text class="row-value">共 {{totalBoxes}} 盒</text>
     </view>
     <view class="row" wx:if="{{mode !== 'package'}}">
-      <text class="row-value text-muted">散订按盒数一次性配送，占用当日机动余量（含保质期内结转），卖完即止</text>
+      <text class="row-value text-muted">剩余库存按品种分开计算（含近几天未售完的结转），每种奶各自有各自的量；散订按盒数一次性配送，卖完即止</text>
     </view>
     <block wx:if="{{mode === 'package'}}">
       <view class="row">
@@ -83,7 +87,7 @@
       <view class="line-item" wx:for="{{items}}" wx:key="productId">
         <view class="line-info">
           <view class="line-name">{{item.name}}</view>
-          <view class="line-meta">{{item.spec || ''}} · ¥{{item.price}}/盒</view>
+          <view class="line-meta {{item.quantity > quotaMap[item.productId] ? 'line-insufficient' : ''}}">{{item.spec || ''}} · ¥{{item.price}}/盒 · 剩 {{quotaMap[item.productId] || 0}} 盒</view>
         </view>
         <view class="stepper">
           <view class="stepper-btn" bindtap="decrease" data-index="{{index}}">−</view>

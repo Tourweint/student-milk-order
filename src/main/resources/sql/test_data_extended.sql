@@ -279,10 +279,13 @@ INSERT INTO nutrition_info (id, product_id, energy, protein, fat, carbohydrate, 
 (8, 8, 200.00, 1.00, 1.50, 8.00, 60.00, 35.00);
 
 -- 新增每日机动配额（替代已下线的传统库存）
-INSERT INTO daily_quota (quota_date, total_quota, used_quota, remark) VALUES
-(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 80, 0, '机动配额'),
-(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 80, 0, '机动配额'),
-(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 60, 0, '机动配额');
+INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark) VALUES
+(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 1, 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 2, 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 1, 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 2, 80, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 1, 60, 0, '机动配额'),
+(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 2, 60, 0, '机动配额');
 
 -- ============================================================
 -- 7. 扩展套餐明细

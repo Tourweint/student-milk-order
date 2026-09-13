@@ -23,9 +23,9 @@ function getPackageDetail(id) {
   return get('/product/package/' + id)
 }
 
-/** 某日剩余机动配额（单日零散订购可售盒数） */
-function getQuotaRemaining(date) {
-  return get('/product/quota/remaining', { date })
+/** 某日各品种剩余机动配额（[{productId, remaining}]） */
+function getQuotaRemainingListList(date) {
+  return get('/product/quota/remaining/list', { date })
 }
 
 module.exports = {
@@ -33,5 +33,5 @@ module.exports = {
   getProductDetail,
   getPackageList,
   getPackageDetail,
-  getQuotaRemaining
+  getQuotaRemainingList
 }

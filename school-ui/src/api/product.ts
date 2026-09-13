@@ -83,12 +83,12 @@ export function getQuotaList(params: { startDate?: string; endDate?: string }) {
   return get('/product/quota/list', params)
 }
 
-/** 某日剩余机动盒数 */
-export function getQuotaRemaining(date: string) {
-  return get('/product/quota/remaining', { date })
+/** 某日各品种剩余机动盒数 */
+export function getQuotaRemainingList(date: string) {
+  return get('/product/quota/remaining/list', { date })
 }
 
-/** 设置某日机动配额 */
-export function setQuota(data: { quotaDate: string; totalQuota: number; remark?: string }) {
-  return put('/product/quota', data)
+/** 批量设置某日各品种配额 */
+export function setQuotaBatch(data: { quotaDate: string; items: { productId: number; totalQuota: number }[]; remark?: string }) {
+  return put('/product/quota/batch', data)
 }

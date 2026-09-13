@@ -180,23 +180,25 @@ CREATE TABLE IF NOT EXISTS meal_package_item (
     KEY idx_product_id (product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='套餐明细表';
 
--- 每日机动配额表（单日零散订购用；学期套餐为统一预约定制，不占配额）
+-- 每日机动配额表（单日零散订购用，按品种设置；学期套餐为统一预约定制，不占配额）
 CREATE TABLE IF NOT EXISTS daily_quota (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '配额ID',
     quota_date DATE NOT NULL COMMENT '配额日期',
-    total_quota INT NOT NULL COMMENT '当日机动总盒数（管理员设置）',
-    used_quota INT NOT NULL DEFAULT 0 COMMENT '当日已售盒数',
+    product_id BIGINT NOT NULL COMMENT '奶品ID（按品种设置）',
+    total_quota INT NOT NULL COMMENT '当日该品种机动总盒数（管理员设置）',
+    used_quota INT NOT NULL DEFAULT 0 COMMENT '当日该品种已售盒数',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
-    UNIQUE KEY uk_quota_date (quota_date)
+    UNIQUE KEY uk_date_product (quota_date, product_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日机动配额表';
 
--- 每日机动配额扣减台账（按订单记录从各日池子扣减的盒数，供退订精确回补）
+-- 每日机动配额扣减台账（按订单×品种×池子日期记录扣减盒数，供退订精确回补）
 CREATE TABLE IF NOT EXISTS daily_quota_usage (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '台账ID',
     order_id BIGINT NOT NULL COMMENT '订单ID',
+    product_id BIGINT NOT NULL COMMENT '奶品ID',
     quota_date DATE NOT NULL COMMENT '被扣减的池子日期',
     boxes INT NOT NULL COMMENT '扣减盒数',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

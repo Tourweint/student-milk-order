@@ -3,9 +3,9 @@ package com.milk.order.module.product.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
-import com.milk.order.module.product.dto.DailyQuotaRequest;
+import com.milk.order.module.product.dto.DailyQuotaBatchRequest;
 import com.milk.order.module.product.dto.PackageSaveRequest;
-import com.milk.order.module.product.entity.DailyQuota;
+import com.milk.order.module.product.vo.QuotaVO;
 import com.milk.order.module.product.entity.MealPackage;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.entity.ProductCategory;
@@ -139,7 +139,7 @@ public class ProductController {
     // 已废弃传统仓库库存（入库/出库/盘点），仅保留【每日机动配额】支撑单日零散订购
 
     @GetMapping("/quota/list")
-    public ApiResponse<List<DailyQuota>> quotaList(
+    public ApiResponse<List<QuotaVO>> quotaList(
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
         LocalDate start = StringUtils.hasText(startDate) ? LocalDate.parse(startDate) : null;
@@ -148,13 +148,18 @@ public class ProductController {
     }
 
     @GetMapping("/quota/remaining")
-    public ApiResponse<Integer> quotaRemaining(@RequestParam String date) {
-        return ApiResponse.success(dailyQuotaService.remaining(LocalDate.parse(date)));
+    public ApiResponse<Integer> quotaRemaining(@RequestParam Long productId, @RequestParam String date) {
+        return ApiResponse.success(dailyQuotaService.remaining(productId, LocalDate.parse(date)));
     }
 
-    @PutMapping("/quota")
-    public ApiResponse<Void> setQuota(@Valid @RequestBody DailyQuotaRequest request) {
-        dailyQuotaService.setQuota(request.getQuotaDate(), request.getTotalQuota(), request.getRemark());
+    @GetMapping("/quota/remaining/list")
+    public ApiResponse<List<QuotaVO>> quotaRemainingList(@RequestParam String date) {
+        return ApiResponse.success(dailyQuotaService.remainingList(LocalDate.parse(date)));
+    }
+
+    @PutMapping("/quota/batch")
+    public ApiResponse<Void> setQuotaBatch(@Valid @RequestBody DailyQuotaBatchRequest request) {
+        dailyQuotaService.setQuotaBatch(request.getQuotaDate(), request.getItems(), request.getRemark());
         return ApiResponse.success();
     }
 }

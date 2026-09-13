@@ -79,14 +79,21 @@ INSERT INTO meal_package (id, package_name, package_type, description, original_
 -- ============================================================
 -- 测试每日机动配额数据（未来7天每日50盒，供单日零散订购）
 -- ============================================================
-INSERT INTO daily_quota (quota_date, total_quota, used_quota, remark) VALUES
-(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 4 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 5 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 6 DAY), 50, 0, '机动配额示例'),
-(DATE_ADD(CURDATE(), INTERVAL 7 DAY), 50, 0, '机动配额示例');
+INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark) VALUES
+(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 4 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 5 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 6 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 7 DAY), 1, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 1 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 2 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 3 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 4 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 5 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 6 DAY), 2, 30, 0, '机动配额示例'),
+(DATE_ADD(CURDATE(), INTERVAL 7 DAY), 2, 30, 0, '机动配额示例');
 
 -- ============================================================
 -- 测试营养成分数据

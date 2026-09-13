@@ -32,6 +32,7 @@ import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.MealPackageItemMapper;
 import com.milk.order.module.product.mapper.MealPackageMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
+import com.milk.order.module.product.dto.QuotaDeductItem;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.entity.SysUser;
@@ -205,13 +206,20 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             }
         }
 
-        // 3.1 零散订购预检当日机动配额（权威扣减在支付成功事务中）
+        // 3.1 零散订购预检各品种当日机动配额（只读校验，权威扣减在支付成功事务中）
         if (request.getPackageId() == null) {
-            int boxes = items.stream().mapToInt(OrderItemRequest::getQuantity).sum();
-            int remaining = dailyQuotaService.remaining(request.getDeliveryStartDate());
-            if (boxes > remaining) {
-                throw new BusinessException(
-                        request.getDeliveryStartDate() + " 当日机动配额不足（剩余 " + remaining + " 盒），卖完即止");
+            Map<Long, Integer> need = new LinkedHashMap<>();
+            for (OrderItemRequest item : items) {
+                need.merge(item.getProductId(), item.getQuantity(), Integer::sum);
+            }
+            for (Map.Entry<Long, Integer> entry : need.entrySet()) {
+                int available = dailyQuotaService.remaining(entry.getKey(), request.getDeliveryStartDate());
+                if (entry.getValue() > available) {
+                    Product p = productMapper.selectById(entry.getKey());
+                    String name = p == null ? "奶品" + entry.getKey() : p.getProductName();
+                    throw new BusinessException("「" + name + "」" + request.getDeliveryStartDate()
+                            + " 剩余库存 " + available + " 盒，不足本次订购的 " + entry.getValue() + " 盒，卖完即止");
+                }
             }
         }
 
@@ -339,9 +347,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         if (order.getPayAmount() == null) {
             throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
         }
-        // 1. 零散订购扣减当日机动配额（含保质期内结转；学期套餐为全校统一预约定制，不占配额）
+        // 1. 零散订购按品种扣减当日机动配额（含保质期内结转；学期套餐为全校统一预约定制，不占配额）
         if (order.getPackageId() == null) {
-            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), sumBoxes(getOrderItems(id)));
+            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), toQuotaItems(getOrderItems(id)));
         }
         // 2. 写支付记录
         String transactionId = nextNo("MOCK");
@@ -438,7 +446,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         if (order.getPackageId() == null) {
             List<OrderItem> items = orderItemMapper.selectList(
                     new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
-            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), sumBoxes(items));
+            dailyQuotaService.deduct(order.getId(), order.getDeliveryStartDate(), toQuotaItems(items));
         }
         // 2. 支付流水：更新预下单的待支付流水为成功，缺失时补建
         PaymentRecord pending = paymentRecordMapper.selectOne(
@@ -559,9 +567,11 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         return order;
     }
 
-    /** 明细总盒数（零散订购占用当日机动配额的数量） */
-    private int sumBoxes(List<OrderItem> items) {
-        return items.stream().mapToInt(OrderItem::getQuantity).sum();
+    /** 明细转配额扣减项（按品种） */
+    private List<QuotaDeductItem> toQuotaItems(List<OrderItem> items) {
+        return items.stream()
+                .map(i -> new QuotaDeductItem(i.getProductId(), i.getQuantity()))
+                .collect(Collectors.toList());
     }
 
     /**

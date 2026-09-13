@@ -187,3 +187,7 @@
   font-size: 24rpx;
   color: #909399;
 }
+
+.line-insufficient {
+  color: #f56c6c;
+}
