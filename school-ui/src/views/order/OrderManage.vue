@@ -42,7 +42,6 @@
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
           <el-button v-if="row.status === 1" link type="success" @click="handlePay(row)">支付</el-button>
-          <el-button v-if="row.status === 2" link type="warning" @click="handleDeliver(row)">开始配送</el-button>
           <el-button v-if="row.status === 3" link type="primary" @click="handleComplete(row)">完成</el-button>
           <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleCancel(row)">退订</el-button>
         </template>
@@ -74,7 +73,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getOrderList, payOrder, cancelOrder, deliverOrder, completeOrder
+  getOrderList, payOrder, cancelOrder, completeOrder
 } from '@/api/order'
 import { getAllClass } from '@/api/clazz'
 import OrderCreateDialog from './components/OrderCreateDialog.vue'
@@ -153,12 +152,6 @@ async function handlePay(row: any) {
   })
   await payOrder(row.id)
   ElMessage.success('支付成功')
-  fetchList()
-}
-
-async function handleDeliver(row: any) {
-  await deliverOrder(row.id)
-  ElMessage.success('已开始配送')
   fetchList()
 }
 

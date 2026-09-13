@@ -78,14 +78,15 @@ const userStore = useUserStore()
 const isCollapse = ref(false)
 
 const menuList: { path: string; title: string; icon: string; roles?: string[] }[] = [
-  { path: '/dashboard', title: '数据看板', icon: 'DataAnalysis' },
+  { path: '/dashboard', title: '数据看板', icon: 'DataAnalysis', roles: ['ADMIN', 'TEACHER'] },
   { path: '/user', title: '用户管理', icon: 'User', roles: ['ADMIN'] },
-  { path: '/clazz', title: '班级管理', icon: 'OfficeBuilding' },
-  { path: '/student', title: '学生管理', icon: 'Avatar' },
+  { path: '/clazz', title: '班级管理', icon: 'OfficeBuilding', roles: ['ADMIN', 'TEACHER'] },
+  { path: '/student', title: '学生管理', icon: 'Avatar', roles: ['ADMIN', 'TEACHER'] },
   { path: '/product', title: '奶品管理', icon: 'Goods', roles: ['ADMIN'] },
-  { path: '/order', title: '订单管理', icon: 'List' },
-  { path: '/delivery', title: '配送管理', icon: 'Van' },
-  { path: '/nutrition', title: '营养统计', icon: 'Histogram' },
+  { path: '/order', title: '订单管理', icon: 'List', roles: ['ADMIN', 'TEACHER'] },
+  { path: '/delivery-station', title: '配送站面板', icon: 'Box', roles: ['ADMIN', 'DELIVERY'] },
+  { path: '/delivery', title: '配送管理', icon: 'Van', roles: ['ADMIN', 'TEACHER'] },
+  { path: '/nutrition', title: '营养统计', icon: 'Histogram', roles: ['ADMIN', 'TEACHER'] },
   { path: '/system', title: '系统管理', icon: 'Setting', roles: ['ADMIN'] }
 ]
 

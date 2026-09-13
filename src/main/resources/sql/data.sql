@@ -11,17 +11,19 @@ USE student_milk_order;
 INSERT INTO sys_role (id, role_code, role_name, description, sort, status) VALUES
 (1, 'ADMIN', '系统管理员', '系统最高权限，可管理所有模块', 1, 1),
 (2, 'TEACHER', '班主任', '管理本班学生、查看本班订购情况', 2, 1),
-(3, 'PARENT', '学生/家长', '为孩子订奶、查看订单和营养统计', 3, 1);
+(3, 'PARENT', '学生/家长', '为孩子订奶、查看订单和营养统计', 3, 1),
+(4, 'DELIVERY', '配送站', '执行每日配送：查看配送任务、点击今日已送出，签收情况只读', 4, 1);
 
 -- ============================================================
 -- 默认账号（密码均为：123456，BCrypt加密）
 -- ============================================================
 INSERT INTO sys_user (id, username, password, real_name, phone, status, class_id, remark) VALUES
 (1, 'admin', '$2a$10$FQT4S46u.RHli474uHPJxOZX6FkxJA.OZLf8PeButQwAGW629nZXG', '系统管理员', '13800000000', 1, NULL, '默认管理员账号'),
-(2, 'teacher', '$2a$10$FQT4S46u.RHli474uHPJxOZX6FkxJA.OZLf8PeButQwAGW629nZXG', '王老师', '13800000001', 1, 1, '演示班主任账号');
+(2, 'teacher', '$2a$10$FQT4S46u.RHli474uHPJxOZX6FkxJA.OZLf8PeButQwAGW629nZXG', '王老师', '13800000001', 1, 1, '演示班主任账号'),
+(3, 'delivery', '$2a$10$FQT4S46u.RHli474uHPJxOZX6FkxJA.OZLf8PeButQwAGW629nZXG', '配送站', '13800000002', 1, NULL, '演示配送站账号');
 
 -- 用户角色关联
-INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1), (2, 2);
+INSERT INTO sys_user_role (user_id, role_id) VALUES (1, 1), (2, 2), (3, 4);
 
 -- ============================================================
 -- 测试年级数据

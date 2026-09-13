@@ -31,7 +31,7 @@
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="row.status === 1" link type="primary" @click="handleStart(row)">开始配送</el-button>
+          <el-button v-if="row.status === 1 && isAdmin" link type="primary" @click="handleStart(row)">开始配送</el-button>
           <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleCancel(row)">取消</el-button>
           <el-button link type="info" @click="viewRecords(row)">查看记录</el-button>
         </template>
@@ -71,13 +71,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import {
   getDeliveryTaskList, generateDeliveryTasks, startDeliveryTask, cancelDeliveryTask
 } from '@/api/delivery'
 import { getAllClass } from '@/api/clazz'
+
+// 开始配送由管理员/配送站执行（配送任务开始配送会联动订单并触发退款闸门），班主任只读+签收
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
 
 const emit = defineEmits<{ (e: 'view-records', task: any): void }>()
 

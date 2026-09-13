@@ -511,6 +511,10 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                 && !OrderStatus.PAID.getCode().equals(status)) {
             throw new BusinessException("当前订单状态不允许退订（仅待支付/已支付可退）");
         }
+        // 退款闸门保险：订单仍是已支付但存在配送中任务（奶已实际送出）时同样拒绝退订
+        if (deliveryTaskService.hasDispatchingTask(id)) {
+            throw new BusinessException("订单已开始配送，不可退订，请联系管理员线下处理");
+        }
         // 已支付的零散订购退订按台账回补配额（学期套餐不占配额，无需回补）
         if (OrderStatus.PAID.getCode().equals(status) && order.getPackageId() == null) {
             dailyQuotaService.restore(id);
@@ -536,14 +540,29 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     // ==================== 配送/完成 ====================
 
     @Override
-    public void startDelivery(Long id) {
-        OrderInfo order = getOrder(id);
-        checkOrderAccess(order);
-        if (!OrderStatus.PAID.getCode().equals(order.getStatus())) {
-            throw new BusinessException("仅已支付订单可开始配送");
+    public void markDeliveringIfPaid(Long orderId) {
+        OrderInfo order = getById(orderId);
+        if (order == null) {
+            return;
         }
-        order.setStatus(OrderStatus.DELIVERING.getCode());
+        if (OrderStatus.PAID.getCode().equals(order.getStatus())) {
+            order.setStatus(OrderStatus.DELIVERING.getCode());
+            updateById(order);
+        }
+    }
+
+    @Override
+    public void completeOrderIfAllTasksDone(Long orderId) {
+        OrderInfo order = getById(orderId);
+        if (order == null || !OrderStatus.DELIVERING.getCode().equals(order.getStatus())) {
+            return;
+        }
+        if (deliveryTaskService.hasUnfinishedTask(orderId)) {
+            return;
+        }
+        order.setStatus(OrderStatus.COMPLETED.getCode());
         updateById(order);
+        log.info("订单 {} 配送任务全部到达终态，自动完成", order.getOrderNo());
     }
 
     @Override

@@ -23,8 +23,7 @@ import java.util.List;
  * - POST   /api/order                 创建订单（待支付，不扣库存）
  * - POST   /api/order/prepay/{id}    微信支付预下单（模拟）：返回调起支付凭证，支付结果经微信异步回调更新
  * - POST   /api/order/pay/{id}       模拟支付（同步：写支付记录+改已支付+扣库存），供管理端与续订内部流程
- * - PUT    /api/order/cancel/{id}    退订（已支付退订回库）
- * - PUT    /api/order/deliver/{id}   开始配送（已支付→配送中）
+ * - PUT    /api/order/cancel/{id}    退订（仅未开始配送可退；开始配送由配送任务联动触发退款闸门）
  * - PUT    /api/order/complete/{id}  完成订单（配送中→已完成）
  * - GET    /api/order/{id}/items     订单明细
  */
@@ -75,12 +74,6 @@ public class OrderController {
     public ApiResponse<Void> cancel(@PathVariable Long id,
                                     @RequestParam(required = false) String reason) {
         orderInfoService.cancelOrder(id, reason);
-        return ApiResponse.success();
-    }
-
-    @PutMapping("/deliver/{id}")
-    public ApiResponse<Void> deliver(@PathVariable Long id) {
-        orderInfoService.startDelivery(id);
         return ApiResponse.success();
     }
 

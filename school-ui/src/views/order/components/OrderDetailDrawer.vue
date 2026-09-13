@@ -49,7 +49,6 @@
         <!-- 操作 -->
         <div class="action-bar">
           <el-button v-if="order.status === 1" type="success" @click="handlePay">模拟支付</el-button>
-          <el-button v-if="order.status === 2" type="warning" @click="handleDeliver">开始配送</el-button>
           <el-button v-if="order.status === 3" type="primary" @click="handleComplete">完成订单</el-button>
           <el-button v-if="order.status === 1 || order.status === 2" type="danger" @click="handleCancel">退订</el-button>
         </div>
@@ -62,7 +61,7 @@
 import { ref, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getOrderById, payOrder, cancelOrder, deliverOrder, completeOrder
+  getOrderById, payOrder, cancelOrder, completeOrder
 } from '@/api/order'
 
 const props = defineProps<{ visible: boolean; orderId: number | null }>()
@@ -111,13 +110,6 @@ async function handlePay() {
   await ElMessageBox.confirm('确定支付该订单吗？', '提示', { type: 'warning' })
   await payOrder(order.value.id)
   ElMessage.success('支付成功')
-  await loadDetail(order.value.id)
-  emit('status-changed')
-}
-
-async function handleDeliver() {
-  await deliverOrder(order.value.id)
-  ElMessage.success('已开始配送')
   await loadDetail(order.value.id)
   emit('status-changed')
 }

@@ -295,6 +295,8 @@ CREATE TABLE IF NOT EXISTS delivery_task (
     quantity INT NOT NULL DEFAULT 1 COMMENT '配送数量',
     status TINYINT NOT NULL DEFAULT 1 COMMENT '任务状态：1-待配送，2-配送中，3-已完成，4-已取消',
     delivery_person_id BIGINT COMMENT '配送人ID',
+    dispatch_by VARCHAR(50) COMMENT '派送操作人（用户名，开始配送时记录）',
+    dispatch_time DATETIME COMMENT '派送时间（开始配送时记录）',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

@@ -4,14 +4,17 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
 import com.milk.order.module.delivery.dto.BatchSignRequest;
+import com.milk.order.module.delivery.dto.BatchStartRequest;
 import com.milk.order.module.delivery.dto.SignRequest;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
+import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
 
 /**
  * 配送管理控制器
@@ -20,7 +23,9 @@ import javax.validation.Valid;
  * - POST   /api/delivery/task/generate     按日期生成配送任务（可选班级，手工补生成用；支付成功后系统自动生成整期任务）
  * - GET    /api/delivery/task/list          配送任务分页（日期/班级/状态）
  * - GET    /api/delivery/task/{id}          任务详情
- * - PUT    /api/delivery/task/start/{id}    开始配送（待配送→配送中）
+ * - PUT    /api/delivery/task/start/{id}    开始配送（待配送→配送中，记录派送人/时间并联动订单）
+ * - PUT    /api/delivery/task/batch-start   今日已送出：按日期批量开始配送（幂等，退款闸门联动；ADMIN/DELIVERY）
+ * - GET    /api/delivery/task/summary       某配送日期按班级汇总（配送站面板今日概览）
  * - PUT    /api/delivery/task/cancel/{id}   取消任务
  * - GET    /api/delivery/record/list         配送记录分页（日期/班级/学生/签收状态）
  * - POST   /api/delivery/record/sign         签收（同时任务完成+生成营养摄入）
@@ -46,9 +51,12 @@ public class DeliveryController {
             @RequestParam(defaultValue = "1") Long pageNum,
             @RequestParam(defaultValue = "10") Long pageSize,
             @RequestParam(required = false) String deliveryDate,
+            @RequestParam(required = false) String dateEnd,
+            @RequestParam(required = false) String orderNo,
             @RequestParam(required = false) Long classId,
             @RequestParam(required = false) Integer status) {
-        IPage<DeliveryTaskVO> page = deliveryTaskService.pageTasks(pageNum, pageSize, deliveryDate, classId, status);
+        IPage<DeliveryTaskVO> page = deliveryTaskService.pageTasks(
+                pageNum, pageSize, deliveryDate, dateEnd, orderNo, classId, status);
         return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
     }
 
@@ -61,6 +69,18 @@ public class DeliveryController {
     public ApiResponse<Void> startTask(@PathVariable Long id) {
         deliveryTaskService.startDelivery(id);
         return ApiResponse.success();
+    }
+
+    /** 今日已送出：按日期（可选班级）批量开始配送，联动订单进入配送中（退款闸门） */
+    @PutMapping("/task/batch-start")
+    public ApiResponse<Integer> batchStartTasks(@Valid @RequestBody BatchStartRequest request) {
+        return ApiResponse.success(deliveryTaskService.batchStartDelivery(request.getDeliveryDate(), request.getClassId()));
+    }
+
+    /** 某配送日期按班级汇总任务状态数量（配送站面板今日概览） */
+    @GetMapping("/task/summary")
+    public ApiResponse<List<DailyDispatchSummaryVO>> taskSummary(@RequestParam String deliveryDate) {
+        return ApiResponse.success(deliveryTaskService.dailySummary(deliveryDate));
     }
 
     @PutMapping("/task/cancel/{id}")

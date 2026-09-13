@@ -38,8 +38,11 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 退订（待支付/已支付可退；已支付的退订回库） */
     void cancelOrder(Long id, String reason);
 
-    /** 开始配送（已支付 → 配送中） */
-    void startDelivery(Long id);
+    /** 任务开始配送联动：订单为已支付时置为配送中，其余状态不动作（退款闸门的统一出口） */
+    void markDeliveringIfPaid(Long orderId);
+
+    /** 配送任务全部到达终态（已完成/已取消）时自动完成订单（仅配送中状态生效，其余不动作） */
+    void completeOrderIfAllTasksDone(Long orderId);
 
     /** 完成订单（配送中 → 已完成） */
     void completeOrder(Long id);

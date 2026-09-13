@@ -18,6 +18,7 @@ import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
 import com.milk.order.module.delivery.mapper.DeliveryTaskMapper;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
+import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
 import com.milk.order.module.nutrition.entity.NutritionInfo;
@@ -28,11 +29,14 @@ import com.milk.order.module.order.entity.OrderInfo;
 import com.milk.order.module.order.entity.OrderItem;
 import com.milk.order.module.order.mapper.OrderInfoMapper;
 import com.milk.order.module.order.mapper.OrderItemMapper;
+import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -63,6 +67,14 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final NutritionInfoMapper nutritionInfoMapper;
     private final NutritionIntakeMapper nutritionIntakeMapper;
     private final DataScopeResolver dataScopeResolver;
+
+    /**
+     * 任务开始配送联动订单状态（已支付→配送中）须经 OrderInfoService 统一状态机出口；
+     * OrderInfoServiceImpl 反向依赖本服务，@Lazy 注入打破构造器循环依赖
+     */
+    @Lazy
+    @Autowired
+    private OrderInfoService orderInfoService;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final Pattern ML_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*ml", Pattern.CASE_INSENSITIVE);
@@ -170,15 +182,34 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     // ==================== 任务查询 ====================
 
     @Override
-    public IPage<DeliveryTaskVO> pageTasks(Long pageNum, Long pageSize, String deliveryDate, Long classId, Integer status) {
+    public IPage<DeliveryTaskVO> pageTasks(Long pageNum, Long pageSize, String deliveryDate, String dateEnd,
+                                           String orderNo, Long classId, Integer status) {
+        // 数据权限：班主任仅能查看本班配送任务，管理员/配送站不限
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getClassId() != null) {
+            classId = scope.getClassId();
+        }
         Page<DeliveryTask> page = new Page<>(
                 pageNum == null ? SystemConstants.DEFAULT_PAGE_NUM : pageNum,
                 pageSize == null ? SystemConstants.DEFAULT_PAGE_SIZE : Math.min(pageSize, SystemConstants.MAX_PAGE_SIZE));
         LambdaQueryWrapper<DeliveryTask> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StringUtils.hasText(deliveryDate), DeliveryTask::getDeliveryDate, deliveryDate)
+                // 与 deliveryDate 组合成日期区间：deliveryDate ~ dateEnd
+                .le(StringUtils.hasText(dateEnd), DeliveryTask::getDeliveryDate, dateEnd)
                 .eq(classId != null, DeliveryTask::getClassId, classId)
                 .eq(status != null, DeliveryTask::getStatus, status)
                 .orderByDesc(DeliveryTask::getId);
+        if (StringUtils.hasText(orderNo)) {
+            List<Long> matchedOrderIds = orderInfoMapper.selectList(
+                            new LambdaQueryWrapper<OrderInfo>().like(OrderInfo::getOrderNo, orderNo))
+                    .stream().map(OrderInfo::getId).collect(Collectors.toList());
+            if (matchedOrderIds.isEmpty()) {
+                Page<DeliveryTaskVO> empty = new Page<>(page.getCurrent(), page.getSize(), 0);
+                empty.setRecords(Collections.emptyList());
+                return empty;
+            }
+            wrapper.in(DeliveryTask::getOrderId, matchedOrderIds);
+        }
         IPage<DeliveryTask> taskPage = page(page, wrapper);
         List<DeliveryTaskVO> voList = convertTasks(taskPage.getRecords());
 
@@ -199,12 +230,52 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     // ==================== 任务状态流转 ====================
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void startDelivery(Long taskId) {
         DeliveryTask task = getTask(taskId);
         if (task.getStatus() != 1) {
             throw new BusinessException("仅待配送任务可开始配送");
         }
+        doDispatch(task);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchStartDelivery(String deliveryDate, Long classId) {
+        if (!StringUtils.hasText(deliveryDate)) {
+            throw new BusinessException("请选择配送日期");
+        }
+        LocalDate date;
+        try {
+            date = LocalDate.parse(deliveryDate);
+        } catch (Exception e) {
+            throw new BusinessException("配送日期格式不正确");
+        }
+        // 仅对待配送任务生效，重复点击幂等
+        List<DeliveryTask> tasks = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getDeliveryDate, date)
+                .eq(DeliveryTask::getStatus, 1)
+                .eq(classId != null, DeliveryTask::getClassId, classId));
+        if (tasks.isEmpty()) {
+            return 0;
+        }
+        Set<Long> orderIds = new LinkedHashSet<>();
+        for (DeliveryTask task : tasks) {
+            doDispatch(task);
+            orderIds.add(task.getOrderId());
+        }
+        // 退款闸门：任务开始配送即联动订单已支付→配送中，此后订单不可自助退订
+        for (Long orderId : orderIds) {
+            orderInfoService.markDeliveringIfPaid(orderId);
+        }
+        return tasks.size();
+    }
+
+    /** 单条任务开始配送：状态待配送→配送中，记录派送人与派送时间（审计痕迹） */
+    private void doDispatch(DeliveryTask task) {
         task.setStatus(2); // 配送中
+        task.setDispatchBy(SecurityUtils.getCurrentUsername());
+        task.setDispatchTime(LocalDateTime.now());
         updateById(task);
     }
 
@@ -225,6 +296,63 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             record.setRemark("任务已取消");
             deliveryRecordMapper.updateById(record);
         }
+        // 任务全部到达终态时自动完成订单
+        orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
+    }
+
+    /** 某配送日期按班级汇总任务状态数量（配送站面板今日概览） */
+    @Override
+    public List<DailyDispatchSummaryVO> dailySummary(String deliveryDate) {
+        if (!StringUtils.hasText(deliveryDate)) {
+            throw new BusinessException("请选择配送日期");
+        }
+        LocalDate date;
+        try {
+            date = LocalDate.parse(deliveryDate);
+        } catch (Exception e) {
+            throw new BusinessException("配送日期格式不正确");
+        }
+        List<DeliveryTask> tasks = baseMapper.selectList(
+                new LambdaQueryWrapper<DeliveryTask>().eq(DeliveryTask::getDeliveryDate, date));
+        if (tasks.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, List<DeliveryTask>> byClass = tasks.stream()
+                .collect(Collectors.groupingBy(DeliveryTask::getClassId, LinkedHashMap::new, Collectors.toList()));
+        Map<Long, ClassInfo> classMap = classInfoMapper.selectBatchIds(byClass.keySet()).stream()
+                .collect(Collectors.toMap(ClassInfo::getId, Function.identity()));
+        return byClass.entrySet().stream().map(entry -> {
+            DailyDispatchSummaryVO vo = new DailyDispatchSummaryVO();
+            vo.setClassId(entry.getKey());
+            ClassInfo c = classMap.get(entry.getKey());
+            vo.setClassName(c == null ? null : c.getClassName());
+            vo.setTotal(entry.getValue().size());
+            vo.setPending(countStatus(entry.getValue(), 1));
+            vo.setDispatching(countStatus(entry.getValue(), 2));
+            vo.setCompleted(countStatus(entry.getValue(), 3));
+            vo.setCancelled(countStatus(entry.getValue(), 4));
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    private int countStatus(List<DeliveryTask> tasks, int status) {
+        return (int) tasks.stream().filter(t -> t.getStatus() != null && t.getStatus() == status).count();
+    }
+
+    @Override
+    public boolean hasDispatchingTask(Long orderId) {
+        Long count = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .eq(DeliveryTask::getStatus, 2));
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean hasUnfinishedTask(Long orderId) {
+        Long count = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .in(DeliveryTask::getStatus, Arrays.asList(1, 2)));
+        return count != null && count > 0;
     }
 
     // ==================== 签收 / 拒收 ====================
@@ -238,6 +366,10 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         }
         if (record.getSignStatus() != 2) {
             throw new BusinessException("仅未签收记录可签收");
+        }
+        DeliveryTask task = getTask(record.getTaskId());
+        if (task.getStatus() == null || task.getStatus() != 2) {
+            throw new BusinessException("配送站尚未送出该任务，不能签收");
         }
         String signPerson = StringUtils.hasText(request.getSignPerson())
                 ? request.getSignPerson() : SecurityUtils.getCurrentUsername();
@@ -262,10 +394,11 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             classId = scope.getClassId();
         }
 
-        // 找到该日期（可选班级）下全部未签收记录
+        // 找到该日期（可选班级）下已送出（配送中）任务的未签收记录；未送出的任务不允许代签
         LambdaQueryWrapper<DeliveryTask> taskWrapper = new LambdaQueryWrapper<>();
         taskWrapper.eq(DeliveryTask::getDeliveryDate, date)
-                .eq(classId != null, DeliveryTask::getClassId, classId);
+                .eq(classId != null, DeliveryTask::getClassId, classId)
+                .eq(DeliveryTask::getStatus, 2);
         List<DeliveryTask> tasks = baseMapper.selectList(taskWrapper);
         if (tasks.isEmpty()) {
             return 0;
@@ -287,6 +420,10 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
      * 调用方需保证记录处于未签收状态，且在事务内。
      */
     private void doSign(DeliveryRecord record, String signPerson, String remark) {
+        DeliveryTask task = getTask(record.getTaskId());
+        if (task.getStatus() == null || task.getStatus() != 2) {
+            throw new BusinessException("配送站尚未送出该任务，不能签收");
+        }
         record.setSignStatus(1); // 已签收
         record.setSignTime(LocalDateTime.now());
         record.setSignPerson(signPerson);
@@ -296,12 +433,14 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         deliveryRecordMapper.updateById(record);
 
         // 任务状态为已完成
-        DeliveryTask task = getTask(record.getTaskId());
         task.setStatus(3); // 已完成
         updateById(task);
 
         // 生成营养摄入记录
         generateNutritionIntake(record, task);
+
+        // 任务全部到达终态时自动完成订单
+        orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
     }
 
     @Override
@@ -313,15 +452,21 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (record.getSignStatus() != 2) {
             throw new BusinessException("仅未签收记录可拒收");
         }
+        DeliveryTask task = getTask(record.getTaskId());
+        if (task.getStatus() == null || task.getStatus() != 2) {
+            throw new BusinessException("配送站尚未送出该任务，不能拒收");
+        }
         record.setSignStatus(3); // 拒收
         record.setSignTime(LocalDateTime.now());
         record.setRemark(StringUtils.hasText(reason) ? reason : "拒收");
         deliveryRecordMapper.updateById(record);
 
         // 任务改为已取消
-        DeliveryTask task = getTask(record.getTaskId());
         task.setStatus(4);
         updateById(task);
+
+        // 任务全部到达终态时自动完成订单
+        orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
     }
 
     // ==================== 订单退订联动 ====================

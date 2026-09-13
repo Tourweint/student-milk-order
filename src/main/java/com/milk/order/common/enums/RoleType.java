@@ -10,7 +10,8 @@ public enum RoleType {
 
     ADMIN("ADMIN", "系统管理员"),
     TEACHER("TEACHER", "班主任"),
-    PARENT("PARENT", "学生/家长");
+    PARENT("PARENT", "学生/家长"),
+    DELIVERY("DELIVERY", "配送站");
 
     private final String code;
     private final String desc;

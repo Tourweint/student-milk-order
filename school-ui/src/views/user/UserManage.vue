@@ -278,15 +278,17 @@ function roleName(code: string): string {
   const map: Record<string, string> = {
     ADMIN: '管理员',
     TEACHER: '班主任',
+    DELIVERY: '配送站',
     PARENT: '家长'
   }
   return map[code] || code
 }
 
-function roleTagType(code: string): 'danger' | 'warning' | 'success' | 'info' {
-  const map: Record<string, 'danger' | 'warning' | 'success' | 'info'> = {
+function roleTagType(code: string): 'danger' | 'warning' | 'success' | 'info' | 'primary' {
+  const map: Record<string, 'danger' | 'warning' | 'success' | 'info' | 'primary'> = {
     ADMIN: 'danger',
     TEACHER: 'warning',
+    DELIVERY: 'primary',
     PARENT: 'success'
   }
   return map[code] || 'info'

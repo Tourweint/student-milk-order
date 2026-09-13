@@ -58,12 +58,19 @@ public class SecurityConfig {
                 .antMatchers(HttpMethod.DELETE, "/api/product/**", "/api/nutrition/**").hasRole("ADMIN")
                 // 班级与学生管理、统计看板：Web 管理端角色
                 .antMatchers("/api/clazz/**", "/api/stats/**").hasAnyRole("ADMIN", "TEACHER")
-                // 配送任务与签收/拒收：仅管理端角色（家长仅读取配送记录）
-                .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER")
+                // 配送任务与签收/拒收：签收/拒收仅管理端角色（家长仅读取配送记录，配送站对签收只读）
+                .antMatchers(HttpMethod.POST, "/api/delivery/task/generate").hasAnyRole("ADMIN", "TEACHER")
+                .antMatchers(HttpMethod.PUT, "/api/delivery/task/cancel/**").hasAnyRole("ADMIN", "TEACHER")
+                // "今日已送出"批量开始配送（退款闸门动作）：管理员与配送站；单条开始配送同权限（班主任不可开始配送，只读+签收）
+                .antMatchers(HttpMethod.PUT, "/api/delivery/task/batch-start").hasAnyRole("ADMIN", "DELIVERY")
+                .antMatchers(HttpMethod.PUT, "/api/delivery/task/start/**").hasAnyRole("ADMIN", "DELIVERY")
+                .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER", "DELIVERY")
                 .antMatchers(HttpMethod.POST, "/api/delivery/record/**").hasAnyRole("ADMIN", "TEACHER")
-                // 订单状态机写操作：开始配送/完成订单仅管理端角色，家长不可代跑配送流程
-                .antMatchers(HttpMethod.PUT, "/api/order/deliver/**", "/api/order/complete/**").hasAnyRole("ADMIN", "TEACHER")
-                // 其余接口需认证：订单、续订等三端共用，数据范围由 Service 层数据权限控制
+                // 完成订单仅管理端角色（订单已无独立"开始配送"入口，配送中由配送任务联动触发）
+                .antMatchers(HttpMethod.PUT, "/api/order/complete/**").hasAnyRole("ADMIN", "TEACHER")
+                // 订单数据仅学校侧角色与家长可见（配送站按任务配送，不接触订单数据）
+                .antMatchers("/api/order/**").hasAnyRole("ADMIN", "TEACHER", "PARENT")
+                // 其余接口需认证：续订、奶品/营养 GET 等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()
                 .exceptionHandling()

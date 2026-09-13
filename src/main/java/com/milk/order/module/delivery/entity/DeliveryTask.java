@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * 配送任务表
@@ -41,6 +42,12 @@ public class DeliveryTask extends BaseEntity {
 
     /** 配送人 ID */
     private Long deliveryPersonId;
+
+    /** 派送操作人（用户名，开始配送时记录） */
+    private String dispatchBy;
+
+    /** 派送时间（开始配送时记录） */
+    private LocalDateTime dispatchTime;
 
     /** 备注 */
     private String remark;

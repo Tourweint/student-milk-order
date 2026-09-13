@@ -20,7 +20,7 @@ const routes: RouteRecordRaw[] = [
         path: 'dashboard',
         name: 'Dashboard',
         component: () => import('@/views/Dashboard.vue'),
-        meta: { title: '数据看板', icon: 'DataAnalysis' }
+        meta: { title: '数据看板', icon: 'DataAnalysis', roles: ['ADMIN', 'TEACHER'] }
       },
       {
         path: 'user',
@@ -32,13 +32,13 @@ const routes: RouteRecordRaw[] = [
         path: 'clazz',
         name: 'ClassManage',
         component: () => import('@/views/clazz/ClassManage.vue'),
-        meta: { title: '班级管理', icon: 'OfficeBuilding' }
+        meta: { title: '班级管理', icon: 'OfficeBuilding', roles: ['ADMIN', 'TEACHER'] }
       },
       {
         path: 'student',
         name: 'StudentManage',
         component: () => import('@/views/student/StudentManage.vue'),
-        meta: { title: '学生管理', icon: 'Avatar' }
+        meta: { title: '学生管理', icon: 'Avatar', roles: ['ADMIN', 'TEACHER'] }
       },
       {
         path: 'product',
@@ -50,19 +50,25 @@ const routes: RouteRecordRaw[] = [
         path: 'order',
         name: 'OrderManage',
         component: () => import('@/views/order/OrderManage.vue'),
-        meta: { title: '订单管理', icon: 'List' }
+        meta: { title: '订单管理', icon: 'List', roles: ['ADMIN', 'TEACHER'] }
+      },
+      {
+        path: 'delivery-station',
+        name: 'DeliveryStation',
+        component: () => import('@/views/delivery/DeliveryStation.vue'),
+        meta: { title: '配送站面板', icon: 'Box', roles: ['ADMIN', 'DELIVERY'] }
       },
       {
         path: 'delivery',
         name: 'DeliveryManage',
         component: () => import('@/views/delivery/DeliveryManage.vue'),
-        meta: { title: '配送管理', icon: 'Van' }
+        meta: { title: '配送管理', icon: 'Van', roles: ['ADMIN', 'TEACHER'] }
       },
       {
         path: 'nutrition',
         name: 'NutritionStats',
         component: () => import('@/views/nutrition/NutritionStats.vue'),
-        meta: { title: '营养统计', icon: 'Histogram' }
+        meta: { title: '营养统计', icon: 'Histogram', roles: ['ADMIN', 'TEACHER'] }
       },
       {
         path: 'system',
@@ -85,6 +91,17 @@ const router = createRouter({
   routes
 })
 
+// 当前用户有权访问的第一个菜单页（角色不满足时的回退目标，避免硬编码 /dashboard 造成回退死循环）
+function firstAllowedPath(): string {
+  const roles = useUserStore().roles
+  const children = routes.find((r) => r.path === '/')?.children ?? []
+  const allowed = children.find((m) => {
+    const mr = m.meta?.roles as string[] | undefined
+    return !mr?.length || mr.some((r) => roles.includes(r))
+  })
+  return (allowed?.path as string) ?? '/login'
+}
+
 // 路由守卫
 router.beforeEach((to, from, next) => {
   const token = getToken()
@@ -104,7 +121,7 @@ router.beforeEach((to, from, next) => {
     const roles = useUserStore().roles
     if (!roles.some((r) => requiredRoles.includes(r))) {
       ElMessage.error('无权访问该页面')
-      next({ path: '/dashboard' })
+      next({ path: firstAllowedPath() })
       return
     }
   }

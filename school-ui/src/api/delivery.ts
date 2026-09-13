@@ -5,15 +5,27 @@ export function generateDeliveryTasks(deliveryDate: string, classId?: number) {
   return post('/delivery/task/generate', null, { params: { deliveryDate, classId } })
 }
 
-/** 配送任务分页 */
+/** 配送任务分页（deliveryDate+dateEnd 组合为日期区间；orderNo 按订单号模糊筛选） */
 export function getDeliveryTaskList(params: {
   pageNum: number
   pageSize: number
   deliveryDate?: string
+  dateEnd?: string
+  orderNo?: string
   classId?: number
   status?: number
 }) {
   return get('/delivery/task/list', params)
+}
+
+/** 今日已送出：按日期（可选班级）批量开始配送，联动订单进入配送中（此后不可退订） */
+export function batchStartDeliveryTasks(data: { deliveryDate: string; classId?: number }) {
+  return put('/delivery/task/batch-start', data)
+}
+
+/** 某配送日期按班级汇总任务状态（配送站面板今日概览） */
+export function getDailyTaskSummary(deliveryDate: string) {
+  return get('/delivery/task/summary', { deliveryDate })
 }
 
 /** 配送任务详情 */

@@ -18,6 +18,7 @@ import java.util.List;
  * <ul>
  *   <li>ADMIN：不限</li>
  *   <li>TEACHER：仅本班（classId）</li>
+ *   <li>DELIVERY：不限（仅限配送任务/记录相关接口，接口层已限制）</li>
  *   <li>PARENT：仅自己绑定的学生（studentId）</li>
  * </ul>
  */

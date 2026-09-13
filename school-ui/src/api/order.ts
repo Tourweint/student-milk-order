@@ -33,11 +33,6 @@ export function cancelOrder(id: number, reason?: string) {
   return put(`/order/cancel/${id}`, null, { params: { reason } })
 }
 
-/** 开始配送（已支付→配送中） */
-export function deliverOrder(id: number) {
-  return put(`/order/deliver/${id}`)
-}
-
 /** 完成订单（配送中→已完成） */
 export function completeOrder(id: number) {
   return put(`/order/complete/${id}`)

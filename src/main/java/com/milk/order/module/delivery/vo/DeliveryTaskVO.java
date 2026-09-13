@@ -28,6 +28,8 @@ public class DeliveryTaskVO implements Serializable {
     private Integer quantity;
     private Integer status;
     private String statusText;
+    private String dispatchBy;
+    private LocalDateTime dispatchTime;
     private String remark;
     private LocalDateTime createTime;
 
@@ -49,6 +51,8 @@ public class DeliveryTaskVO implements Serializable {
         vo.setQuantity(t.getQuantity());
         vo.setStatus(t.getStatus());
         vo.setStatusText(statusText);
+        vo.setDispatchBy(t.getDispatchBy());
+        vo.setDispatchTime(t.getDispatchTime());
         vo.setRemark(t.getRemark());
         vo.setCreateTime(t.getCreateTime());
         return vo;
