@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.milk.order.common.constant.StateTransitions;
 import com.milk.order.common.constant.SystemConstants;
 import com.milk.order.common.enums.OrderStatus;
 import com.milk.order.common.utils.SecurityUtils;
@@ -34,12 +35,15 @@ import com.milk.order.module.product.mapper.MealPackageMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.product.dto.QuotaDeductItem;
 import com.milk.order.module.product.service.DailyQuotaService;
+import com.milk.order.module.system.service.StateMachineService;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.entity.SysUser;
 import com.milk.order.module.user.mapper.SysUserMapper;
 import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -71,6 +75,15 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     private final DataScopeResolver dataScopeResolver;
     private final WechatPaySimulator wechatPaySimulator;
     private final DeliveryTaskService deliveryTaskService;
+    private final StateMachineService stateMachineService;
+
+    /**
+     * 自代理：对账/查单补偿需要走 @Transactional 代理路径（同类内部直调不经过代理），
+     * 注入自身接口代理保证每笔补偿独立事务，单笔失败不影响其余订单。
+     */
+    @Lazy
+    @Autowired
+    private OrderInfoService self;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter PAY_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -341,9 +354,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     public void payOrder(Long id) {
         OrderInfo order = getOrder(id);
         checkOrderAccess(order);
-        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
-            throw new BusinessException("当前订单状态不允许支付");
-        }
+        // 状态机规则校验（管理端可配置是否允许 待支付→已支付）
+        stateMachineService.assertAllowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_PAY, order.getStatus(), "订单");
         if (order.getPayAmount() == null) {
             throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
         }
@@ -365,8 +378,12 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         record.setRemark("模拟支付");
         paymentRecordMapper.insert(record);
 
-        // 3. 更新订单状态，并展开整个配送周期的配送任务与签收记录（同一事务，幂等）
-        markOrderPaid(order, transactionId);
+        // 3. CAS 条件更新订单状态（仅 待支付→已支付），并发下只有一个请求成功；
+        //    失败则抛异常回滚配额扣减与流水写入
+        if (!markOrderPaid(order, transactionId)) {
+            throw new BusinessException("订单状态已变更，支付处理冲突，请刷新后重试");
+        }
+        // 4. 展开整个配送周期的配送任务与签收记录（幂等）
         deliveryTaskService.generateTasksForOrder(order);
     }
 
@@ -377,27 +394,18 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     public WechatPayParamsVO prepayOrder(Long id) {
         OrderInfo order = getOrder(id);
         checkOrderAccess(order);
-        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
-            throw new BusinessException("当前订单状态不允许支付");
-        }
+        stateMachineService.assertAllowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_PAY, order.getStatus(), "订单");
         if (order.getPayAmount() == null) {
             throw new BusinessException("订单支付金额缺失，无法支付，请联系管理员处理");
         }
         // 1. 作废该订单历史待支付流水（重复发起支付场景）
-        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
-                new LambdaQueryWrapper<PaymentRecord>()
-                        .eq(PaymentRecord::getOrderId, id)
-                        .eq(PaymentRecord::getStatus, 1));
-        for (PaymentRecord pending : pendings) {
-            pending.setStatus(3);
-            pending.setRemark("重新发起支付，原待支付流水作废");
-            paymentRecordMapper.updateById(pending);
-        }
+        voidPendingRecords(id, "重新发起支付，原待支付流水作废");
 
         // 2. 调模拟微信统一下单，获取预支付凭证与调起参数
         WechatPayParamsVO params = wechatPaySimulator.unifiedOrder(order);
 
-        // 3. 写待支付流水（回调成功后更新为已支付）
+        // 3. 写待支付流水（回调成功后更新为已支付；该流水时间即支付超时判定的锚点）
         PaymentRecord record = new PaymentRecord();
         record.setOrderId(order.getId());
         record.setOrderNo(order.getOrderNo());
@@ -423,16 +431,23 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             log.warn("[模拟微信支付] 回调订单不存在：{}", notify.getOutTradeNo());
             return false;
         }
-        // 幂等：已支付及后续状态直接返回成功，避免重复扣库存/重复流水
+        // 幂等（快速路径）：已支付及后续状态直接返回成功，避免重复扣库存/重复流水
         if (OrderStatus.PAID.getCode().equals(order.getStatus())
                 || OrderStatus.DELIVERING.getCode().equals(order.getStatus())
                 || OrderStatus.COMPLETED.getCode().equals(order.getStatus())) {
             log.info("[模拟微信支付] 订单 {} 状态已为 {}，回调幂等处理", order.getOrderNo(), order.getStatus());
             return true;
         }
-        // 订单已取消（如用户取消支付后回调才到达）：拒绝本轮回调，不将已取消订单置为已支付
+        // 订单已取消（如用户取消支付/超时取消后回调才到达）：拒绝本轮回调，不将已取消订单置为已支付
         if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
             log.warn("[模拟微信支付] 订单 {} 状态为 {}（已取消/非法），回调拒绝处理", order.getOrderNo(), order.getStatus());
+            return false;
+        }
+        // 状态机规则：管理端禁用 待支付→已支付 时拒绝落账（微信将重试，规则恢复后自动补齐）
+        if (!stateMachineService.allowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_PAY, order.getStatus())) {
+            log.warn("[模拟微信支付] 订单 {} 状态迁移被状态机规则禁止（ORDER/PAY/{}），回调暂不处理",
+                    order.getOrderNo(), order.getStatus());
             return false;
         }
         // 金额核对：回调金额必须与订单应付金额一致
@@ -442,7 +457,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                     order.getOrderNo(), notify.getAmount(), order.getPayAmount());
             return false;
         }
-        // 1. 零散订购扣减当日机动配额（含保质期内结转；学期套餐为全校统一预约定制，不占配额），不足则本轮回调失败
+        // 1. 零散订购扣减当日机动配额（含保质期内结转；学期套餐不占配额），不足则本轮回调失败
         if (order.getPackageId() == null) {
             List<OrderItem> items = orderItemMapper.selectList(
                     new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderId, order.getId()));
@@ -483,20 +498,156 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             record.setRemark("微信支付（模拟）回调成功（无预下单流水，补建）");
             paymentRecordMapper.insert(record);
         }
-        // 3. 更新订单状态，并展开整个配送周期的配送任务与签收记录（同一事务，幂等）
-        markOrderPaid(order, notify.getTransactionId());
+        // 3. CAS 条件更新订单状态：并发双回调/回调与取消竞争时仅一方成功；
+        //    失败抛异常回滚本轮回调的全部写入（配额扣减/流水更新），微信重试后走幂等快速路径
+        if (!markOrderPaid(order, notify.getTransactionId())) {
+            log.warn("[模拟微信支付] 订单 {} 状态已被并发修改，本轮回调回滚", order.getOrderNo());
+            throw new BusinessException("订单状态已变更，回调处理冲突");
+        }
+        // 4. 展开整个配送周期的配送任务与签收记录（同一事务，幂等）
         deliveryTaskService.generateTasksForOrder(order);
         log.info("[模拟微信支付] 订单 {} 支付成功，流水号 {}", order.getOrderNo(), notify.getTransactionId());
         return true;
     }
 
-    /** 订单置为已支付（统一出口，供同步模拟支付与微信回调共用） */
-    private void markOrderPaid(OrderInfo order, String transactionId) {
-        order.setStatus(OrderStatus.PAID.getCode());
-        order.setPayTime(LocalDateTime.now());
-        order.setPayType(1);
-        order.setTransactionId(transactionId);
-        updateById(order);
+    // ==================== 支付查单 / 对账补偿 / 超时取消 ====================
+
+    @Override
+    public Integer queryPayResult(Long id) {
+        OrderInfo order = getOrder(id);
+        checkOrderAccess(order);
+        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
+            return order.getStatus();
+        }
+        // 待支付：主动向微信侧查单——用户已扣款但回调丢失时补偿落账（前端轮询兜底）
+        WechatPaySimulator.PaidOrder paid = wechatPaySimulator.queryOrder(order.getOrderNo());
+        if (paid != null) {
+            try {
+                self.handleWechatPayNotify(toNotify(paid));
+            } catch (Exception e) {
+                log.warn("[模拟微信支付] 订单 {} 查单补偿处理失败：{}", order.getOrderNo(), e.getMessage());
+            }
+            OrderInfo latest = getById(id);
+            return latest == null ? order.getStatus() : latest.getStatus();
+        }
+        return order.getStatus();
+    }
+
+    @Override
+    public int reconcilePendingPayments() {
+        // 只处理"存在待支付流水且已过在途窗口"的订单：刚发起支付 2 分钟内回调仍在路上，不抢跑
+        LocalDateTime inFlightBefore = LocalDateTime.now().minusMinutes(2);
+        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getStatus, 1)
+                        .lt(PaymentRecord::getCreateTime, inFlightBefore));
+        if (pendings.isEmpty()) {
+            return 0;
+        }
+        Set<String> orderNos = pendings.stream()
+                .map(PaymentRecord::getOrderNo).collect(Collectors.toSet());
+        int count = 0;
+        for (String orderNo : orderNos) {
+            OrderInfo order = lambdaQuery().eq(OrderInfo::getOrderNo, orderNo).one();
+            // 仅待支付订单需要补偿；已支付/已取消的悬挂流水由各自流程负责作废
+            if (order == null || !OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
+                continue;
+            }
+            WechatPaySimulator.PaidOrder paid = wechatPaySimulator.queryOrder(orderNo);
+            if (paid == null) {
+                // 微信侧未扣款：不补偿，留给超时取消任务处理
+                continue;
+            }
+            try {
+                if (self.handleWechatPayNotify(toNotify(paid))) {
+                    count++;
+                    log.info("[支付对账] 订单 {} 回调丢失，已查单补偿落账，流水号 {}", orderNo, paid.getTransactionId());
+                }
+            } catch (Exception e) {
+                log.error("[支付对账] 订单 {} 补偿失败：{}", orderNo, e.getMessage());
+            }
+        }
+        return count;
+    }
+
+    @Override
+    public boolean cancelTimeoutOrder(Long id, int timeoutMinutes) {
+        OrderInfo order = getById(id);
+        if (order == null || !OrderStatus.PENDING_PAYMENT.getCode().equals(order.getStatus())) {
+            return false;
+        }
+        // 超时锚点：最近一次待支付流水时间（无流水则订单创建时间），
+        // 用户刚重新发起过支付的订单不会因创建时间过老而被误杀
+        PaymentRecord latestPending = paymentRecordMapper.selectOne(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, id)
+                        .eq(PaymentRecord::getStatus, 1)
+                        .orderByDesc(PaymentRecord::getId)
+                        .last("LIMIT 1"));
+        LocalDateTime anchor = latestPending != null && latestPending.getCreateTime() != null
+                ? latestPending.getCreateTime() : order.getCreateTime();
+        if (anchor == null || anchor.plusMinutes(timeoutMinutes).isAfter(LocalDateTime.now())) {
+            return false; // 尚未超时
+        }
+        // 取消前查单对账：用户已实际扣款但回调丢失 → 补偿落账，绝不取消已付款订单
+        WechatPaySimulator.PaidOrder paid = wechatPaySimulator.queryOrder(order.getOrderNo());
+        if (paid != null) {
+            try {
+                self.handleWechatPayNotify(toNotify(paid));
+                log.info("[支付超时任务] 订单 {} 已扣款未回调，转为补偿落账，不取消", order.getOrderNo());
+            } catch (Exception e) {
+                log.error("[支付超时任务] 订单 {} 补偿失败，本轮跳过取消：{}", order.getOrderNo(), e.getMessage());
+            }
+            return false;
+        }
+        // 状态机规则：管理端禁用 待支付→已取消 时不自动取消
+        if (!stateMachineService.allowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_CANCEL, order.getStatus())) {
+            log.info("[支付超时任务] 订单 {} 的超时取消被状态机规则禁止，跳过", order.getOrderNo());
+            return false;
+        }
+        // CAS 条件取消：与并发到达的支付回调竞争，仅一方成功
+        boolean cancelled = lambdaUpdate()
+                .eq(OrderInfo::getId, id)
+                .eq(OrderInfo::getStatus, OrderStatus.PENDING_PAYMENT.getCode())
+                .set(OrderInfo::getStatus, OrderStatus.CANCELLED.getCode())
+                .set(OrderInfo::getCancelTime, LocalDateTime.now())
+                .set(OrderInfo::getCancelReason, "支付超时自动取消（超过" + timeoutMinutes + "分钟未支付）")
+                .update();
+        if (!cancelled) {
+            return false;
+        }
+        voidPendingRecords(id, "订单支付超时自动取消，待支付流水作废");
+        log.info("[支付超时任务] 订单 {} 超时未支付，已自动取消", order.getOrderNo());
+        return true;
+    }
+
+    /** 微信侧支付结果转回调报文（查单/对账补偿复用回调处理路径） */
+    private WechatPayNotifyRequest toNotify(WechatPaySimulator.PaidOrder paid) {
+        WechatPayNotifyRequest notify = new WechatPayNotifyRequest();
+        notify.setOutTradeNo(paid.getOutTradeNo());
+        notify.setTransactionId(paid.getTransactionId());
+        notify.setAmount(paid.getAmount());
+        notify.setPayTime(paid.getPayTime() == null
+                ? LocalDateTime.now().format(PAY_TIME_FMT) : paid.getPayTime().format(PAY_TIME_FMT));
+        notify.setResultCode("SUCCESS");
+        return notify;
+    }
+
+    /**
+     * 订单置为已支付（统一出口，CAS 条件更新：仅 待支付→已支付 生效）
+     *
+     * @return false 表示订单已不在待支付状态（并发回调/并发支付/已取消），调用方据此回滚
+     */
+    private boolean markOrderPaid(OrderInfo order, String transactionId) {
+        return lambdaUpdate()
+                .eq(OrderInfo::getId, order.getId())
+                .eq(OrderInfo::getStatus, OrderStatus.PENDING_PAYMENT.getCode())
+                .set(OrderInfo::getStatus, OrderStatus.PAID.getCode())
+                .set(OrderInfo::getPayTime, LocalDateTime.now())
+                .set(OrderInfo::getPayType, 1)
+                .set(OrderInfo::getTransactionId, transactionId)
+                .update();
     }
 
     // ==================== 退订 ====================
@@ -507,10 +658,9 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         OrderInfo order = getOrder(id);
         checkOrderAccess(order);
         Integer status = order.getStatus();
-        if (!OrderStatus.PENDING_PAYMENT.getCode().equals(status)
-                && !OrderStatus.PAID.getCode().equals(status)) {
-            throw new BusinessException("当前订单状态不允许退订（仅待支付/已支付可退）");
-        }
+        // 状态机规则校验（待支付→已取消 / 已支付→已取消 可分别配置）
+        stateMachineService.assertAllowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_CANCEL, status, "订单");
         // 退款闸门保险：订单仍是已支付但存在配送中任务（奶已实际送出）时同样拒绝退订
         if (deliveryTaskService.hasDispatchingTask(id)) {
             throw new BusinessException("订单已开始配送，不可退订，请联系管理员线下处理");
@@ -520,19 +670,18 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             dailyQuotaService.restore(id);
         }
         // 作废待支付流水（微信预下单后未支付即取消的场景），防止残留悬挂的待支付记录
-        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
-                new LambdaQueryWrapper<PaymentRecord>()
-                        .eq(PaymentRecord::getOrderId, id)
-                        .eq(PaymentRecord::getStatus, 1));
-        for (PaymentRecord pending : pendings) {
-            pending.setStatus(3);
-            pending.setRemark("订单取消，待支付流水作废");
-            paymentRecordMapper.updateById(pending);
+        voidPendingRecords(id, "订单取消，待支付流水作废");
+        // CAS 乐观取消：以读取时的状态为条件，与并发的支付回调/超时取消竞争，仅一方成功
+        boolean cancelled = lambdaUpdate()
+                .eq(OrderInfo::getId, id)
+                .eq(OrderInfo::getStatus, status)
+                .set(OrderInfo::getStatus, OrderStatus.CANCELLED.getCode())
+                .set(OrderInfo::getCancelTime, LocalDateTime.now())
+                .set(OrderInfo::getCancelReason, StringUtils.hasText(reason) ? reason : "用户退订")
+                .update();
+        if (!cancelled) {
+            throw new BusinessException("订单状态已变更，请刷新后重试");
         }
-        order.setStatus(OrderStatus.CANCELLED.getCode());
-        order.setCancelTime(LocalDateTime.now());
-        order.setCancelReason(StringUtils.hasText(reason) ? reason : "用户退订");
-        updateById(order);
         // 联动作废支付后已生成的未签收配送任务，避免退订后仍可签收
         deliveryTaskService.cancelPendingTasksForOrder(id);
     }
@@ -542,13 +691,19 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Override
     public void markDeliveringIfPaid(Long orderId) {
         OrderInfo order = getById(orderId);
-        if (order == null) {
+        if (order == null || !OrderStatus.PAID.getCode().equals(order.getStatus())) {
             return;
         }
-        if (OrderStatus.PAID.getCode().equals(order.getStatus())) {
-            order.setStatus(OrderStatus.DELIVERING.getCode());
-            updateById(order);
+        if (!stateMachineService.allowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_DELIVER, order.getStatus())) {
+            log.info("[状态机] 规则禁止 已支付→配送中，订单 {} 保持已支付", order.getOrderNo());
+            return;
         }
+        lambdaUpdate()
+                .eq(OrderInfo::getId, orderId)
+                .eq(OrderInfo::getStatus, OrderStatus.PAID.getCode())
+                .set(OrderInfo::getStatus, OrderStatus.DELIVERING.getCode())
+                .update();
     }
 
     @Override
@@ -560,23 +715,51 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         if (deliveryTaskService.hasUnfinishedTask(orderId)) {
             return;
         }
-        order.setStatus(OrderStatus.COMPLETED.getCode());
-        updateById(order);
-        log.info("订单 {} 配送任务全部到达终态，自动完成", order.getOrderNo());
+        if (!stateMachineService.allowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_AUTO_COMPLETE, order.getStatus())) {
+            log.info("[状态机] 规则禁止 配送中→已完成（自动），订单 {} 保持配送中", order.getOrderNo());
+            return;
+        }
+        boolean updated = lambdaUpdate()
+                .eq(OrderInfo::getId, orderId)
+                .eq(OrderInfo::getStatus, OrderStatus.DELIVERING.getCode())
+                .set(OrderInfo::getStatus, OrderStatus.COMPLETED.getCode())
+                .update();
+        if (updated) {
+            log.info("订单 {} 配送任务全部到达终态，自动完成", order.getOrderNo());
+        }
     }
 
     @Override
     public void completeOrder(Long id) {
         OrderInfo order = getOrder(id);
         checkOrderAccess(order);
-        if (!OrderStatus.DELIVERING.getCode().equals(order.getStatus())) {
-            throw new BusinessException("仅配送中订单可完成");
+        stateMachineService.assertAllowed(StateTransitions.SCENE_ORDER,
+                StateTransitions.ACTION_COMPLETE, order.getStatus(), "订单");
+        boolean updated = lambdaUpdate()
+                .eq(OrderInfo::getId, id)
+                .eq(OrderInfo::getStatus, OrderStatus.DELIVERING.getCode())
+                .set(OrderInfo::getStatus, OrderStatus.COMPLETED.getCode())
+                .update();
+        if (!updated) {
+            throw new BusinessException("订单状态已变更，请刷新后重试");
         }
-        order.setStatus(OrderStatus.COMPLETED.getCode());
-        updateById(order);
     }
 
     // ==================== 内部工具 ====================
+
+    /** 作废某订单全部待支付流水（取消/重新发起支付/超时取消共用） */
+    private void voidPendingRecords(Long orderId, String remark) {
+        List<PaymentRecord> pendings = paymentRecordMapper.selectList(
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getOrderId, orderId)
+                        .eq(PaymentRecord::getStatus, 1));
+        for (PaymentRecord pending : pendings) {
+            pending.setStatus(3);
+            pending.setRemark(remark);
+            paymentRecordMapper.updateById(pending);
+        }
+    }
 
     private OrderInfo getOrder(Long id) {
         OrderInfo order = getById(id);

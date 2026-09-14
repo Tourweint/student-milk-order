@@ -161,3 +161,25 @@
   background: #409eff;
   color: #ffffff;
 }
+
+/* ====== 暂停/恢复状态扩展样式（2026-09-14 订阅边界） ====== */
+.plan-status.paused {
+  color: #e6a23c;
+  background: #fdf6ec;
+}
+
+.mini-warn {
+  color: #e6a23c;
+  border: 1rpx solid #e6a23c;
+}
+
+.mini-success {
+  color: #67c23a;
+  border: 1rpx solid #67c23a;
+}
+
+.plan-actions .plan-row {
+  display: flex;
+  width: 100%;
+  margin-bottom: 8rpx;
+}

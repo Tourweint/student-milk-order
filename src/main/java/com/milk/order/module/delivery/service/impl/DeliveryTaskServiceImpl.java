@@ -1,9 +1,11 @@
 package com.milk.order.module.delivery.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.milk.order.common.constant.StateTransitions;
 import com.milk.order.common.constant.SystemConstants;
 import com.milk.order.common.enums.OrderStatus;
 import com.milk.order.common.utils.SecurityUtils;
@@ -13,6 +15,7 @@ import com.milk.order.module.clazz.entity.Student;
 import com.milk.order.module.clazz.mapper.ClassInfoMapper;
 import com.milk.order.module.clazz.mapper.StudentMapper;
 import com.milk.order.module.delivery.dto.SignRequest;
+import com.milk.order.module.delivery.dto.StockoutCancelRequest;
 import com.milk.order.module.delivery.entity.DeliveryRecord;
 import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
@@ -21,6 +24,9 @@ import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+
+import com.milk.order.module.product.service.DailyQuotaService;
+import com.milk.order.module.system.service.StateMachineService;
 import com.milk.order.module.nutrition.entity.NutritionInfo;
 import com.milk.order.module.nutrition.entity.NutritionIntake;
 import com.milk.order.module.nutrition.mapper.NutritionInfoMapper;
@@ -67,6 +73,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final NutritionInfoMapper nutritionInfoMapper;
     private final NutritionIntakeMapper nutritionIntakeMapper;
     private final DataScopeResolver dataScopeResolver;
+    private final StateMachineService stateMachineService;
+    private final DailyQuotaService dailyQuotaService;
 
     /**
      * 任务开始配送联动订单状态（已支付→配送中）须经 OrderInfoService 统一状态机出口；
@@ -233,6 +241,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     @Transactional(rollbackFor = Exception.class)
     public void startDelivery(Long taskId) {
         DeliveryTask task = getTask(taskId);
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_DISPATCH, task.getStatus(), "配送任务");
         if (task.getStatus() != 1) {
             throw new BusinessException("仅待配送任务可开始配送");
         }
@@ -259,6 +269,9 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (tasks.isEmpty()) {
             return 0;
         }
+        // 状态机规则：与单条开始配送同口径，管理端禁用 待配送→配送中 时批量同样拒绝
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_DISPATCH, 1, "配送任务");
         Set<Long> orderIds = new LinkedHashSet<>();
         for (DeliveryTask task : tasks) {
             doDispatch(task);
@@ -271,33 +284,59 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         return tasks.size();
     }
 
-    /** 单条任务开始配送：状态待配送→配送中，记录派送人与派送时间（审计痕迹） */
+    /**
+     * 单条任务开始配送：状态待配送→配送中，记录派送人与派送时间（审计痕迹）。
+     * CAS 条件更新：并发重复点击/批量与单条撞车时仅一方生效，更新失败按幂等跳过。
+     */
     private void doDispatch(DeliveryTask task) {
-        task.setStatus(2); // 配送中
-        task.setDispatchBy(SecurityUtils.getCurrentUsername());
-        task.setDispatchTime(LocalDateTime.now());
-        updateById(task);
+        boolean updated = lambdaUpdate()
+                .eq(DeliveryTask::getId, task.getId())
+                .eq(DeliveryTask::getStatus, 1)
+                .set(DeliveryTask::getStatus, 2)
+                .set(DeliveryTask::getDispatchBy, SecurityUtils.getCurrentUsername())
+                .set(DeliveryTask::getDispatchTime, LocalDateTime.now())
+                .update();
+        if (updated) {
+            task.setStatus(2);
+        }
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void cancelTask(Long taskId, String reason) {
         DeliveryTask task = getTask(taskId);
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_TASK_CANCEL, task.getStatus(), "配送任务");
         if (task.getStatus() != 1 && task.getStatus() != 2) {
             throw new BusinessException("仅待配送/配送中任务可取消");
         }
-        task.setStatus(4); // 已取消
-        task.setRemark(StringUtils.hasText(reason) ? reason : task.getRemark());
-        updateById(task);
-        // 同步取消关联签收记录
-        DeliveryRecord record = deliveryRecordMapper.selectOne(
-                new LambdaQueryWrapper<DeliveryRecord>().eq(DeliveryRecord::getTaskId, taskId));
-        if (record != null && record.getSignStatus() == 2) {
-            record.setSignStatus(3); // 拒收
-            record.setRemark("任务已取消");
-            deliveryRecordMapper.updateById(record);
+        // CAS 条件取消：以读取时的来源状态为条件，与并发签收/开始配送竞争，仅一方生效；
+        // 否则「读状态→判断→全量更新」会让已完成(3)的任务被并发取消回退为已取消(4)
+        boolean cancelled = lambdaUpdate()
+                .eq(DeliveryTask::getId, taskId)
+                .eq(DeliveryTask::getStatus, task.getStatus())
+                .set(DeliveryTask::getStatus, 4)
+                .set(DeliveryTask::getRemark, StringUtils.hasText(reason) ? reason : task.getRemark())
+                .update();
+        if (!cancelled) {
+            throw new BusinessException("任务状态已变更，请刷新后重试");
         }
+        // 同步取消关联签收记录（仅未签收记录生效，不影响已签收/已拒收结果）
+        markRecordRejected(taskId, "任务已取消");
         // 任务全部到达终态时自动完成订单
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
+    }
+
+    /**
+     * 将任务关联的「未签收」记录置为拒收（条件更新：仅 sign_status=2 生效），
+     * 已完成签收/已拒收的记录不受影响，避免并发下覆盖既有结果
+     */
+    private void markRecordRejected(Long taskId, String remark) {
+        deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getTaskId, taskId)
+                .eq(DeliveryRecord::getSignStatus, 2)
+                .set(DeliveryRecord::getSignStatus, 3)
+                .set(DeliveryRecord::getRemark, remark));
     }
 
     /** 某配送日期按班级汇总任务状态数量（配送站面板今日概览） */
@@ -424,17 +463,35 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (task.getStatus() == null || task.getStatus() != 2) {
             throw new BusinessException("配送站尚未送出该任务，不能签收");
         }
-        record.setSignStatus(1); // 已签收
-        record.setSignTime(LocalDateTime.now());
-        record.setSignPerson(signPerson);
-        if (StringUtils.hasText(remark)) {
-            record.setRemark(remark);
+        // 状态机规则：配送中→已完成（签收）；已完成任务禁止任何回退
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_SIGN, task.getStatus(), "配送任务");
+        // CAS 任务 配送中(2)→已完成(3)：并发重复签收（含批量与单条撞车）仅一方成功，
+        // 失败方中止并回滚本次事务，营养摄入记录不会重复生成
+        boolean taskUpdated = lambdaUpdate()
+                .eq(DeliveryTask::getId, task.getId())
+                .eq(DeliveryTask::getStatus, 2)
+                .set(DeliveryTask::getStatus, 3)
+                .update();
+        if (!taskUpdated) {
+            throw new BusinessException("任务状态已变更，请刷新后重试");
         }
-        deliveryRecordMapper.updateById(record);
-
-        // 任务状态为已完成
+        // CAS 签收记录 未签收(2)→已签收(1)，防止并发覆盖既有签收结果
+        LocalDateTime signTime = LocalDateTime.now();
+        boolean recordUpdated = deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getId, record.getId())
+                .eq(DeliveryRecord::getSignStatus, 2)
+                .set(DeliveryRecord::getSignStatus, 1)
+                .set(DeliveryRecord::getSignTime, signTime)
+                .set(DeliveryRecord::getSignPerson, signPerson)
+                .set(StringUtils.hasText(remark), DeliveryRecord::getRemark, remark)) > 0;
+        if (!recordUpdated) {
+            throw new BusinessException("该配送记录已被处理，请刷新后重试");
+        }
+        record.setSignStatus(1); // 已签收
+        record.setSignTime(signTime);
+        record.setSignPerson(signPerson);
         task.setStatus(3); // 已完成
-        updateById(task);
 
         // 生成营养摄入记录
         generateNutritionIntake(record, task);
@@ -444,6 +501,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void rejectRecord(Long recordId, String reason) {
         DeliveryRecord record = deliveryRecordMapper.selectById(recordId);
         if (record == null) {
@@ -456,17 +514,96 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (task.getStatus() == null || task.getStatus() != 2) {
             throw new BusinessException("配送站尚未送出该任务，不能拒收");
         }
-        record.setSignStatus(3); // 拒收
-        record.setSignTime(LocalDateTime.now());
-        record.setRemark(StringUtils.hasText(reason) ? reason : "拒收");
-        deliveryRecordMapper.updateById(record);
-
-        // 任务改为已取消
-        task.setStatus(4);
-        updateById(task);
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_REJECT, task.getStatus(), "配送任务");
+        // CAS 任务 配送中(2)→已取消(4)：与并发签收竞争，仅一方生效
+        boolean taskUpdated = lambdaUpdate()
+                .eq(DeliveryTask::getId, task.getId())
+                .eq(DeliveryTask::getStatus, 2)
+                .set(DeliveryTask::getStatus, 4)
+                .update();
+        if (!taskUpdated) {
+            throw new BusinessException("任务状态已变更，请刷新后重试");
+        }
+        // CAS 签收记录 未签收(2)→拒收(3)
+        String rejectReason = StringUtils.hasText(reason) ? reason : "拒收";
+        boolean recordUpdated = deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getId, record.getId())
+                .eq(DeliveryRecord::getSignStatus, 2)
+                .set(DeliveryRecord::getSignStatus, 3)
+                .set(DeliveryRecord::getSignTime, LocalDateTime.now())
+                .set(DeliveryRecord::getRemark, rejectReason)) > 0;
+        if (!recordUpdated) {
+            throw new BusinessException("该配送记录已被处理，请刷新后重试");
+        }
+        task.setStatus(4); // 已取消
 
         // 任务全部到达终态时自动完成订单
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
+    }
+
+    // ==================== 配送前缺货批量取消 ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int stockoutCancel(StockoutCancelRequest request) {
+        LocalDate date;
+        try {
+            date = LocalDate.parse(request.getDeliveryDate());
+        } catch (Exception e) {
+            throw new BusinessException("配送日期格式不正确");
+        }
+        Long productId = request.getProductId();
+        if (productId == null) {
+            throw new BusinessException("奶品不能为空");
+        }
+        String reason = StringUtils.hasText(request.getReason())
+                ? request.getReason() : "配送前缺货，单期取消";
+        // 仅取消「待配送」任务：已完成（含已签收）任务禁止任何回退；
+        // 配送中任务不动（奶已出库在途），由配送站按实际到货情况处理
+        List<DeliveryTask> tasks = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getDeliveryDate, date)
+                .eq(DeliveryTask::getProductId, productId)
+                .eq(DeliveryTask::getStatus, 1));
+        if (tasks.isEmpty()) {
+            return 0;
+        }
+        // 状态机规则：待配送→已取消（缺货）；管理端禁用该迁移时拒绝整批操作
+        stateMachineService.assertAllowed(StateTransitions.SCENE_DELIVERY_TASK,
+                StateTransitions.ACTION_STOCKOUT_CANCEL, 1, "配送任务");
+
+        Set<Long> orderIds = new LinkedHashSet<>();
+        int count = 0;
+        for (DeliveryTask task : tasks) {
+            // CAS 逐条取消：与并发的开始配送/签收竞争，失败说明该任务已流转，跳过
+            boolean cancelled = lambdaUpdate()
+                    .eq(DeliveryTask::getId, task.getId())
+                    .eq(DeliveryTask::getStatus, 1)
+                    .set(DeliveryTask::getStatus, 4)
+                    .set(DeliveryTask::getRemark, reason)
+                    .update();
+            if (!cancelled) {
+                continue;
+            }
+            count++;
+            orderIds.add(task.getOrderId());
+            // 同步取消关联未签收记录（仅 sign_status=2 生效）
+            markRecordRejected(task.getId(), reason);
+        }
+        // 关联零散订单的当日配额按台账回补（学期套餐不占配额，无台账自然跳过）：
+        // 只回补该订单该品种该日期的份额，不影响同订单其他期次与其他品种
+        for (Long orderId : orderIds) {
+            OrderInfo order = orderInfoMapper.selectById(orderId);
+            if (order != null && order.getPackageId() == null) {
+                dailyQuotaService.restoreForOrderProductDate(orderId, productId, date);
+            }
+        }
+        // 缺货只取消单期任务，不影响主订阅计划：续订照常，下期任务由续订订单展开生成
+        // 订单任务全部到达终态时自动完成（如散订单期即全部任务）
+        for (Long orderId : orderIds) {
+            orderInfoService.completeOrderIfAllTasksDone(orderId);
+        }
+        return count;
     }
 
     // ==================== 订单退订联动 ====================
@@ -481,17 +618,18 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             if (task.getStatus() != 1 && task.getStatus() != 2) {
                 continue;
             }
-            task.setStatus(4); // 已取消
-            task.setRemark("订单已退订，任务作废");
-            updateById(task);
-            // 同步取消未签收的签收记录
-            DeliveryRecord record = deliveryRecordMapper.selectOne(
-                    new LambdaQueryWrapper<DeliveryRecord>().eq(DeliveryRecord::getTaskId, task.getId()));
-            if (record != null && record.getSignStatus() == 2) {
-                record.setSignStatus(3); // 拒收
-                record.setRemark("订单已退订");
-                deliveryRecordMapper.updateById(record);
+            // CAS 条件取消：与并发开始配送/签收竞争，失败说明任务已流转，跳过
+            boolean cancelled = lambdaUpdate()
+                    .eq(DeliveryTask::getId, task.getId())
+                    .in(DeliveryTask::getStatus, 1, 2)
+                    .set(DeliveryTask::getStatus, 4)
+                    .set(DeliveryTask::getRemark, "订单已退订，任务作废")
+                    .update();
+            if (!cancelled) {
+                continue;
             }
+            // 同步取消未签收的签收记录（仅 sign_status=2 生效）
+            markRecordRejected(task.getId(), "订单已退订");
             count++;
         }
         return count;

@@ -26,6 +26,8 @@ public class SubscriptionPlanVO implements Serializable {
     private String statusText;
     private LocalDateTime nextRenewalTime;
     private LocalDateTime lastRenewalTime;
+    private LocalDateTime pauseTime;
+    private String pauseReason;
     private String remark;
     private LocalDateTime createTime;
 
@@ -43,11 +45,29 @@ public class SubscriptionPlanVO implements Serializable {
         vo.setCycleType(plan.getCycleType());
         vo.setCycleTypeText(plan.getCycleType() == 1 ? "每月续订" : "未知");
         vo.setStatus(plan.getStatus());
-        vo.setStatusText(plan.getStatus() == 1 ? "已开启" : "已关闭");
+        vo.setStatusText(statusText(plan.getStatus()));
         vo.setNextRenewalTime(plan.getNextRenewalTime());
         vo.setLastRenewalTime(plan.getLastRenewalTime());
+        vo.setPauseTime(plan.getPauseTime());
+        vo.setPauseReason(plan.getPauseReason());
         vo.setRemark(plan.getRemark());
         vo.setCreateTime(plan.getCreateTime());
         return vo;
+    }
+
+    public static String statusText(Integer status) {
+        if (status == null) {
+            return "未知";
+        }
+        switch (status) {
+            case 0:
+                return "已关闭";
+            case 1:
+                return "已开启";
+            case 2:
+                return "已暂停";
+            default:
+                return "未知";
+        }
     }
 }

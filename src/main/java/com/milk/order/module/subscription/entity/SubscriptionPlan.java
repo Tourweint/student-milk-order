@@ -30,7 +30,7 @@ public class SubscriptionPlan extends BaseEntity {
     /** 续订周期：1-每月续订 */
     private Integer cycleType;
 
-    /** 状态：0-已关闭，1-已开启 */
+    /** 状态：0-已关闭，1-已开启，2-已暂停 */
     private Integer status;
 
     /** 下次续订日期 */
@@ -41,6 +41,12 @@ public class SubscriptionPlan extends BaseEntity {
 
     /** 续订提醒是否已发送：0-否，1-是 */
     private Integer reminderSent;
+
+    /** 暂停时间 */
+    private LocalDateTime pauseTime;
+
+    /** 暂停原因 */
+    private String pauseReason;
 
     /** 备注 */
     private String remark;

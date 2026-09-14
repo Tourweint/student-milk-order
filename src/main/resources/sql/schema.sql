@@ -378,10 +378,12 @@ CREATE TABLE IF NOT EXISTS subscription_plan (
     package_id BIGINT NOT NULL COMMENT '套餐ID',
     original_order_id BIGINT COMMENT '原订单ID',
     cycle_type TINYINT DEFAULT 1 COMMENT '续订周期：1-每月续订',
-    status TINYINT DEFAULT 1 COMMENT '状态：0-已关闭，1-已开启',
+    status TINYINT DEFAULT 1 COMMENT '状态：0-已关闭，1-已开启，2-已暂停',
     next_renewal_time DATETIME COMMENT '下次续订日期',
     last_renewal_time DATETIME COMMENT '上次续订时间',
     reminder_sent TINYINT DEFAULT 0 COMMENT '续订提醒是否已发送：0-否，1-是',
+    pause_time DATETIME COMMENT '暂停时间',
+    pause_reason VARCHAR(255) COMMENT '暂停原因',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -395,6 +397,32 @@ CREATE TABLE IF NOT EXISTS subscription_plan (
 -- ============================================================
 -- 9. 系统管理模块
 -- ============================================================
+
+-- 系统参数配置表（业务侧带短缓存读取，管理端在线修改即刻生效）
+CREATE TABLE IF NOT EXISTS sys_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '配置ID',
+    config_key VARCHAR(100) NOT NULL COMMENT '配置键',
+    config_value VARCHAR(500) NOT NULL COMMENT '配置值',
+    description VARCHAR(255) COMMENT '配置说明',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统参数配置表';
+
+-- 状态迁移规则表（管理端可在线配置：某场景某动作从某状态迁移是否允许；白名单语义，未配置默认禁止）
+CREATE TABLE IF NOT EXISTS state_transition_rule (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '规则ID',
+    scene VARCHAR(30) NOT NULL COMMENT '状态机场景：ORDER-订单，DELIVERY_TASK-配送任务，SUBSCRIPTION_PLAN-续订计划',
+    action VARCHAR(30) NOT NULL COMMENT '动作编码：PAY/CANCEL/DELIVER/AUTO_COMPLETE/COMPLETE/DISPATCH/TASK_CANCEL/SIGN/REJECT/STOCKOUT_CANCEL/RENEW/PAUSE/RESUME/CLOSE',
+    from_status TINYINT NOT NULL COMMENT '来源状态码',
+    allowed TINYINT NOT NULL DEFAULT 1 COMMENT '是否允许迁移：1-允许，0-禁止',
+    description VARCHAR(255) COMMENT '规则说明',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_scene_action_from (scene, action, from_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='状态迁移规则表（管理端可配置）';
 
 -- 操作日志表
 CREATE TABLE IF NOT EXISTS operation_log (

@@ -98,6 +98,71 @@ INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark
 (DATE_ADD(CURDATE(), INTERVAL 7 DAY), 2, 30, 0, '机动配额示例');
 
 -- ============================================================
+-- 系统参数配置（支付一致性 / 订阅边界，管理端可在线修改）
+-- ============================================================
+INSERT INTO sys_config (config_key, config_value, description) VALUES
+('order.pay.timeout.minutes', '15', '待支付订单超时自动取消阈值（分钟）；超时后先查单对账兜底再取消'),
+('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账');
+
+-- ============================================================
+-- 状态迁移规则种子（默认规则 = 现行硬编码行为；管理端可在线调整）
+-- 场景：ORDER 订单（1待支付 2已支付 3配送中 4已完成 5已退订）
+--      DELIVERY_TASK 配送任务（1待配送 2配送中 3已完成 4已取消）
+--      SUBSCRIPTION_PLAN 续订计划（0已关闭 1已开启 2已暂停）
+-- ============================================================
+INSERT INTO state_transition_rule (scene, action, from_status, allowed, description) VALUES
+-- 订单
+('ORDER', 'PAY', 1, 1, '待支付订单允许支付成功（模拟支付/微信回调）'),
+('ORDER', 'PAY', 2, 0, '已支付订单拒绝重复支付（重复回调由幂等分支应答）'),
+('ORDER', 'PAY', 3, 0, '配送中订单拒绝支付回调'),
+('ORDER', 'PAY', 4, 0, '已完成订单拒绝支付回调'),
+('ORDER', 'PAY', 5, 0, '已取消订单拒绝支付回调，防止乱改状态'),
+('ORDER', 'CANCEL', 1, 1, '待支付订单允许取消/退订'),
+('ORDER', 'CANCEL', 2, 1, '已支付订单允许退订（存在配送中任务时另有退款闸门）'),
+('ORDER', 'CANCEL', 3, 0, '配送中订单禁止退订（奶已送出）'),
+('ORDER', 'CANCEL', 4, 0, '已完成订单禁止退订'),
+('ORDER', 'CANCEL', 5, 0, '已取消订单禁止重复取消'),
+('ORDER', 'DELIVER', 2, 1, '已支付订单允许进入配送中（今日已送出联动）'),
+('ORDER', 'DELIVER', 3, 0, '配送中订单不可重复流转'),
+('ORDER', 'DELIVER', 1, 0, '待支付订单不可开始配送'),
+('ORDER', 'DELIVER', 4, 0, '已完成订单禁止回退'),
+('ORDER', 'DELIVER', 5, 0, '已取消订单禁止回退'),
+('ORDER', 'AUTO_COMPLETE', 3, 1, '配送中订单在任务全部终态后自动完成'),
+('ORDER', 'AUTO_COMPLETE', 2, 0, '已支付订单未开始配送不自动完成'),
+('ORDER', 'COMPLETE', 3, 1, '配送中订单允许手动完成'),
+('ORDER', 'COMPLETE', 2, 0, '已支付订单须先开始配送'),
+('ORDER', 'COMPLETE', 4, 0, '已完成订单禁止重复完成'),
+-- 配送任务
+('DELIVERY_TASK', 'DISPATCH', 1, 1, '待配送任务允许开始配送（今日已送出）'),
+('DELIVERY_TASK', 'DISPATCH', 2, 0, '配送中任务不可重复送出'),
+('DELIVERY_TASK', 'DISPATCH', 3, 0, '已完成任务禁止回退'),
+('DELIVERY_TASK', 'DISPATCH', 4, 0, '已取消任务禁止回退'),
+('DELIVERY_TASK', 'TASK_CANCEL', 1, 1, '待配送任务允许取消（退订/暂停取消/终止取消）'),
+('DELIVERY_TASK', 'TASK_CANCEL', 2, 1, '配送中任务允许取消（拒收联动）'),
+('DELIVERY_TASK', 'TASK_CANCEL', 3, 0, '已完成任务禁止取消（禁止状态回退）'),
+('DELIVERY_TASK', 'TASK_CANCEL', 4, 0, '已取消任务禁止重复取消'),
+('DELIVERY_TASK', 'SIGN', 2, 1, '已送出任务允许签收完成'),
+('DELIVERY_TASK', 'SIGN', 3, 0, '已完成任务禁止重复签收'),
+('DELIVERY_TASK', 'REJECT', 2, 1, '已送出任务允许拒收'),
+('DELIVERY_TASK', 'REJECT', 3, 0, '已完成任务禁止改为拒收（禁止状态回退）'),
+('DELIVERY_TASK', 'STOCKOUT_CANCEL', 1, 1, '配送前缺货仅可取消待配送任务（单期子订单取消）'),
+('DELIVERY_TASK', 'STOCKOUT_CANCEL', 2, 0, '配送中任务不可缺货自动取消'),
+('DELIVERY_TASK', 'STOCKOUT_CANCEL', 3, 0, '已完成任务禁止缺货取消（禁止状态回退）'),
+-- 续订计划
+('SUBSCRIPTION_PLAN', 'RENEW', 1, 1, '已开启计划允许续订'),
+('SUBSCRIPTION_PLAN', 'RENEW', 2, 0, '已暂停计划禁止续订（暂停期间不扣款）'),
+('SUBSCRIPTION_PLAN', 'RENEW', 0, 0, '已关闭计划禁止续订'),
+('SUBSCRIPTION_PLAN', 'PAUSE', 1, 1, '已开启计划允许暂停'),
+('SUBSCRIPTION_PLAN', 'PAUSE', 2, 0, '已暂停计划禁止重复暂停'),
+('SUBSCRIPTION_PLAN', 'PAUSE', 0, 0, '已关闭计划无需暂停'),
+('SUBSCRIPTION_PLAN', 'RESUME', 2, 1, '已暂停计划允许恢复（续订时间顺延）'),
+('SUBSCRIPTION_PLAN', 'RESUME', 1, 0, '已开启计划无需恢复'),
+('SUBSCRIPTION_PLAN', 'RESUME', 0, 0, '已关闭计划不可恢复（需重新开启）'),
+('SUBSCRIPTION_PLAN', 'CLOSE', 1, 1, '已开启计划允许关闭（终止订阅）'),
+('SUBSCRIPTION_PLAN', 'CLOSE', 2, 1, '已暂停计划允许关闭（终止订阅）'),
+('SUBSCRIPTION_PLAN', 'CLOSE', 0, 0, '已关闭计划禁止重复关闭');
+
+-- ============================================================
 -- 测试营养成分数据
 -- ============================================================
 INSERT INTO nutrition_info (id, product_id, energy, protein, fat, carbohydrate, calcium, sodium) VALUES

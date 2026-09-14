@@ -15,6 +15,7 @@ import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.vo.QuotaVO;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
@@ -32,6 +33,7 @@ import java.util.stream.Collectors;
  * 按保质期（SHELF_DAYS 天）滚动，窗口外的剩余自动作废（动态计算，无需定时任务）。
  * 扣减按品种独立进行、先卖最老的池子（最接近过期的先出），并写订单台账供退订精确回补。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQuota> implements DailyQuotaService {
@@ -234,6 +236,46 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                     .setSql("used_quota = used_quota - " + usage.getBoxes());
             update(update);
             dailyQuotaUsageMapper.deleteById(usage.getId());
+        }
+    }
+
+    /**
+     * 按订单+品种回补配额（缺货取消单期任务专用）：
+     * 取台账中「该订单 × 该品种」的全部扣减行，逐行回补到各自原始池子（含保质期结转池），
+     * 不影响同订单其他品种的占用。零散订单为单日订单，其该品种台账即缺货当日份额。
+     * 幂等：对应台账行回补成功即删除，重复调用自然跳过。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void restoreForOrderProductDate(Long orderId, Long productId, LocalDate quotaDate) {
+        if (orderId == null || productId == null) {
+            return;
+        }
+        List<DailyQuotaUsage> usages = dailyQuotaUsageMapper.selectList(
+                new LambdaQueryWrapper<DailyQuotaUsage>()
+                        .eq(DailyQuotaUsage::getOrderId, orderId)
+                        .eq(DailyQuotaUsage::getProductId, productId));
+        if (usages.isEmpty()) {
+            return; // 该订单该品种无扣减台账（如学期套餐不占配额）
+        }
+        int restored = 0;
+        for (DailyQuotaUsage usage : usages) {
+            // 回补到台账记录的原始池子，且不允许把 used_quota 减到负数（防御性条件更新）
+            LambdaUpdateWrapper<DailyQuota> update = new LambdaUpdateWrapper<>();
+            update.eq(DailyQuota::getQuotaDate, usage.getQuotaDate())
+                    .eq(DailyQuota::getProductId, usage.getProductId())
+                    .apply("used_quota >= {0}", usage.getBoxes())
+                    .setSql("used_quota = used_quota - " + usage.getBoxes());
+            if (update(update)) {
+                dailyQuotaUsageMapper.deleteById(usage.getId());
+                restored += usage.getBoxes() == null ? 0 : usage.getBoxes();
+            } else {
+                log.warn("[配额回补] 订单 {} 品种 {} 池子 {} 回补冲突（used_quota 小于应回补数），跳过该行",
+                        orderId, productId, usage.getQuotaDate());
+            }
+        }
+        if (restored > 0) {
+            log.info("[配额回补] 订单 {} 品种 {} 共回补 {} 盒（缺货单期取消）", orderId, productId, restored);
         }
     }
 

@@ -3,9 +3,7 @@
     <!-- 筛选 -->
     <div class="toolbar">
       <el-date-picker v-model="queryDate" type="date" placeholder="配送日期" value-format="YYYY-MM-DD" class="filter-item" />
-      <el-select v-model="query.classId" placeholder="全部班级" clearable filterable class="filter-item" @change="handleClassChange">
-        <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
-      </el-select>
+      <GradeClassFilter v-model="query.classId" @change="handleClassChange" />
       <el-select v-model="query.studentId" placeholder="全部学生" clearable filterable class="filter-item">
         <el-option v-for="s in studentList" :key="s.id" :label="s.studentName" :value="s.id" />
       </el-select>
@@ -83,6 +81,7 @@ import {
 } from '@/api/delivery'
 import { getAllClass } from '@/api/clazz'
 import { getStudentList } from '@/api/student'
+import GradeClassFilter from '@/views/clazz/components/GradeClassFilter.vue'
 
 const loading = ref(false)
 const tableData = ref<any[]>([])

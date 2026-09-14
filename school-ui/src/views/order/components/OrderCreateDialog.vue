@@ -6,8 +6,9 @@
     <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
       <el-form-item label="学生" prop="studentId">
         <el-select v-model="form.studentId" placeholder="请选择学生" filterable class="full-width">
-          <el-option v-for="s in studentList" :key="s.id"
-            :label="`${s.studentName}（${s.studentNo}）`" :value="s.id" />
+          <el-option-group v-for="g in groupedStudents" :key="g.className" :label="g.className">
+            <el-option v-for="s in g.students" :key="s.id" :label="`${s.studentName}（${s.studentNo}）`" :value="s.id" />
+          </el-option-group>
         </el-select>
       </el-form-item>
 
@@ -53,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { createOrder } from '@/api/order'
@@ -84,6 +85,21 @@ const form = reactive({
   deliveryEndDate: undefined as string | undefined,
   items: [{ productId: undefined as number | undefined, quantity: 1 }],
   remark: ''
+})
+
+/** 学生按班级分组展示，长列表下更容易定位 */
+const groupedStudents = computed(() => {
+  const groups: { className: string; students: any[] }[] = []
+  studentList.value.forEach((s) => {
+    const className = s.className || '未分班'
+    let g = groups.find((x) => x.className === className)
+    if (!g) {
+      g = { className, students: [] }
+      groups.push(g)
+    }
+    g.students.push(s)
+  })
+  return groups
 })
 
 const rules: FormRules = {

@@ -26,6 +26,7 @@ import java.util.List;
  * - PUT    /api/order/cancel/{id}    退订（仅未开始配送可退；开始配送由配送任务联动触发退款闸门）
  * - PUT    /api/order/complete/{id}  完成订单（配送中→已完成）
  * - GET    /api/order/{id}/items     订单明细
+ * - GET    /api/order/{id}/pay-result 支付结果查单（模拟微信查单：回调丢失时前端主动补偿）
  */
 @RestController
 @RequestMapping("/api/order")
@@ -81,6 +82,12 @@ public class OrderController {
     public ApiResponse<Void> complete(@PathVariable Long id) {
         orderInfoService.completeOrder(id);
         return ApiResponse.success();
+    }
+
+    /** 支付结果查单（模拟）：待支付订单主动向微信侧查单，用户已扣款但回调丢失时补偿落账 */
+    @GetMapping("/{id}/pay-result")
+    public ApiResponse<Integer> payResult(@PathVariable Long id) {
+        return ApiResponse.success(orderInfoService.queryPayResult(id));
     }
 
     @GetMapping("/{id}/items")

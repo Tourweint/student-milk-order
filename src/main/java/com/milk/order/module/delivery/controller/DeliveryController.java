@@ -6,6 +6,7 @@ import com.milk.order.common.PageResult;
 import com.milk.order.module.delivery.dto.BatchSignRequest;
 import com.milk.order.module.delivery.dto.BatchStartRequest;
 import com.milk.order.module.delivery.dto.SignRequest;
+import com.milk.order.module.delivery.dto.StockoutCancelRequest;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
@@ -27,6 +28,7 @@ import java.util.List;
  * - PUT    /api/delivery/task/batch-start   今日已送出：按日期批量开始配送（幂等，退款闸门联动；ADMIN/DELIVERY）
  * - GET    /api/delivery/task/summary       某配送日期按班级汇总（配送站面板今日概览）
  * - PUT    /api/delivery/task/cancel/{id}   取消任务
+ * - PUT    /api/delivery/task/stockout-cancel 配送前缺货批量取消（日期+奶品，仅待配送任务，配额回补）
  * - GET    /api/delivery/record/list         配送记录分页（日期/班级/学生/签收状态）
  * - POST   /api/delivery/record/sign         签收（同时任务完成+生成营养摄入）
  * - POST   /api/delivery/record/batch-sign   批量签收（按日期+可选班级，班主任限本班）
@@ -81,6 +83,13 @@ public class DeliveryController {
     @GetMapping("/task/summary")
     public ApiResponse<List<DailyDispatchSummaryVO>> taskSummary(@RequestParam String deliveryDate) {
         return ApiResponse.success(deliveryTaskService.dailySummary(deliveryDate));
+    }
+
+    /** 配送前缺货批量取消：取消某日期某奶品全部待配送任务（单期子订单取消，不影响主订阅与已完成任务） */
+    @PutMapping("/task/stockout-cancel")
+    public ApiResponse<Integer> stockoutCancel(@Valid @RequestBody StockoutCancelRequest request) {
+        int count = deliveryTaskService.stockoutCancel(request);
+        return ApiResponse.success(count);
     }
 
     @PutMapping("/task/cancel/{id}")

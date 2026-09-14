@@ -151,24 +151,75 @@ Page({
     }
   },
 
-  // ==================== 关闭 / 手动续订 ====================
+  // ==================== 暂停 / 恢复 ====================
 
-  handleClose(e) {
+  /** 暂停续订：选择是否同时取消未配送任务（默认保留，已支付权益照常配送） */
+  handlePause(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    wx.showActionSheet({
+      itemList: ['仅暂停续订（未配送任务照常送）', '暂停并取消未配送任务'],
+      success: (res) => {
+        const keep = res.tapIndex === 0
+        wx.showLoading({ title: '处理中' })
+        subscriptionApi.pausePlan(id, '', keep)
+          .then(() => {
+            wx.hideLoading()
+            wx.showToast({ title: '已暂停', icon: 'success' })
+            this.reload()
+          })
+          .catch(() => wx.hideLoading())
+      }
+    })
+  },
+
+  /** 恢复续订：续订时间自动顺延，不会恢复瞬间立刻扣款 */
+  handleResume(e) {
     const id = Number(e.currentTarget.dataset.id)
     wx.showModal({
-      title: '确认关闭',
-      content: '关闭后该计划将不再自动续订，确认关闭？',
+      title: '确认恢复',
+      content: '恢复后从下一个续订时间点继续自动续订（时间已顺延），确认恢复？',
       success: async (res) => {
         if (!res.confirm) return
-        wx.showLoading({ title: '关闭中' })
+        wx.showLoading({ title: '处理中' })
         try {
-          await subscriptionApi.closePlan(id)
+          await subscriptionApi.resumePlan(id)
           wx.hideLoading()
-          wx.showToast({ title: '已关闭', icon: 'success' })
+          wx.showToast({ title: '已恢复', icon: 'success' })
           this.reload()
         } catch (err) {
           wx.hideLoading()
         }
+      }
+    })
+  },
+
+  // ==================== 关闭 / 手动续订 ====================
+
+  handleClose(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    // 终止时机二选一：默认送完当前周期；立即终止会取消未配送任务
+    wx.showActionSheet({
+      itemList: ['送完当前周期（推荐）', '立即终止并取消未配送任务'],
+      success: (res) => {
+        const terminateNow = res.tapIndex === 1
+        wx.showModal({
+          title: '确认关闭',
+          content: terminateNow
+            ? '将停止续订并取消当前周期未配送的任务，剩余期次需线下退款，确认？'
+            : '将停止后续自动续订，已生成的配送任务照常送完，确认？',
+          success: async (m) => {
+            if (!m.confirm) return
+            wx.showLoading({ title: '关闭中' })
+            try {
+              await subscriptionApi.closePlan(id, terminateNow)
+              wx.hideLoading()
+              wx.showToast({ title: '已关闭', icon: 'success' })
+              this.reload()
+            } catch (err) {
+              wx.hideLoading()
+            }
+          }
+        })
       }
     })
   },

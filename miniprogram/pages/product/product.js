@@ -50,10 +50,9 @@ Page({
   // ==================== 数量调整 ====================
 
   increaseQty() {
-    const product = this.data.product
     const max = 99
     if (this.data.buyQty >= max) {
-      wx.showToast({ title: '已达库存上限', icon: 'none' })
+      wx.showToast({ title: '单次最多可订 99 盒', icon: 'none' })
       return
     }
     this.setData({ buyQty: this.data.buyQty + 1 })
@@ -70,7 +69,7 @@ Page({
   addToCart() {
     const product = this.data.product
     if (!product || product.status !== 1) return
-    cart.add(product, this.data.buyQty, product.quantity)
+    cart.add(product, this.data.buyQty)
     this.setData({ cartCount: cart.getCount() })
     wx.showToast({ title: '已加入购物车', icon: 'success' })
   },

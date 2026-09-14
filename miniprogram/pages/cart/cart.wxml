@@ -16,7 +16,7 @@
     </view>
   </view>
 
-  <view class="cart-tip">数量指每日配送盒数，提交后按所选周期配送</view>
+  <view class="cart-tip">散订为一次性配送：结算时选定配送日期，所选盒数当日一次送齐；月度/学期订购请使用首页套餐</view>
 
   <!-- 底部结算栏 -->
   <view class="footer-bar">

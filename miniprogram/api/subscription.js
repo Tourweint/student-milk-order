@@ -23,9 +23,22 @@ function updatePlan(data) {
   return put('/subscription', data)
 }
 
-/** 关闭续订计划 */
-function closePlan(id) {
-  return del('/subscription/' + id)
+/** 暂停续订（已开启→已暂停）；keepPendingTasks=false 同时取消未配送任务 */
+function pausePlan(id, reason, keepPendingTasks) {
+  return put('/subscription/pause/' + id, {
+    reason: reason || '',
+    keepPendingTasks: keepPendingTasks !== false
+  })
+}
+
+/** 恢复续订（已暂停→已开启，续订时间顺延） */
+function resumePlan(id) {
+  return put('/subscription/resume/' + id)
+}
+
+/** 关闭续订计划（终止订阅）：terminateNow=true 立即取消未配送任务 */
+function closePlan(id, terminateNow) {
+  return del('/subscription/' + id + '?terminateNow=' + (terminateNow ? 'true' : 'false'))
 }
 
 /** 手动触发续订，返回新订单 ID */
@@ -38,6 +51,8 @@ module.exports = {
   getPlanDetail,
   createPlan,
   updatePlan,
+  pausePlan,
+  resumePlan,
   closePlan,
   triggerRenewal
 }

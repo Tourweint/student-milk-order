@@ -13,6 +13,14 @@ function getOrderDetail(id) {
   return get('/order/' + id)
 }
 
+/**
+ * 支付结果查单（模拟微信查单）：待支付订单会主动向微信侧查单，
+ * 已扣款但回调丢失时在同一路径补偿落账；返回订单当前状态码
+ */
+function getPayResult(id) {
+  return get('/order/' + id + '/pay-result')
+}
+
 /** 创建订单：{ studentId, packageId, deliveryStartDate, deliveryEndDate, items:[{productId,quantity}], remark } */
 function createOrder(data) {
   return post('/order', data)
@@ -28,6 +36,7 @@ function cancelOrder(id, reason) {
 module.exports = {
   getOrderList,
   getOrderDetail,
+  getPayResult,
   createOrder,
   cancelOrder
 }

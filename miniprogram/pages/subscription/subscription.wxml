@@ -4,7 +4,7 @@
     <view class="card plan" wx:for="{{plans}}" wx:key="id" wx:if="{{plans.length}}">
       <view class="plan-head">
         <text class="plan-name">{{item.packageName || '奶品套餐'}}</text>
-        <text class="plan-status {{item.status === 1 ? 'on' : 'off'}}">{{item.statusText}}</text>
+        <text class="plan-status {{item.status === 1 ? 'on' : item.status === 2 ? 'paused' : 'off'}}">{{item.statusText}}</text>
       </view>
       <view class="plan-row"><text class="plan-label">学生</text><text>{{item.studentName}}</text></view>
       <view class="plan-row"><text class="plan-label">原订单</text><text>{{item.originalOrderNo}}</text></view>
@@ -13,6 +13,12 @@
       <view class="plan-row" wx:if="{{item.remark}}"><text class="plan-label">备注</text><text>{{item.remark}}</text></view>
       <view class="plan-actions" wx:if="{{item.status === 1}}">
         <view class="mini-btn" bindtap="handleTrigger" data-id="{{item.id}}">立即续订</view>
+        <view class="mini-btn mini-warn" bindtap="handlePause" data-id="{{item.id}}">暂停</view>
+        <view class="mini-btn mini-danger" bindtap="handleClose" data-id="{{item.id}}">关闭</view>
+      </view>
+      <view class="plan-actions" wx:if="{{item.status === 2}}">
+        <view class="plan-row"><text class="plan-label">暂停原因</text><text>{{item.pauseReason || '—'}}</text></view>
+        <view class="mini-btn mini-success" bindtap="handleResume" data-id="{{item.id}}">恢复</view>
         <view class="mini-btn mini-danger" bindtap="handleClose" data-id="{{item.id}}">关闭</view>
       </view>
     </view>

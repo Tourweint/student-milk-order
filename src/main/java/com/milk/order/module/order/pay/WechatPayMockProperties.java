@@ -20,4 +20,10 @@ public class WechatPayMockProperties {
 
     /** 模拟回调延迟（毫秒），模拟微信异步通知的网络耗时 */
     private long notifyDelayMs = 500;
+
+    /** 回调失败最大重试次数（不含首次；指数退避 base*2^n，对齐微信重试节奏） */
+    private int notifyMaxRetries = 5;
+
+    /** 回调重试基础退避时长（毫秒），实际退避 = base * 2^attempt */
+    private long notifyRetryBaseMs = 1000;
 }

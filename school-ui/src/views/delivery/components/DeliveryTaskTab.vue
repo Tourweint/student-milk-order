@@ -3,15 +3,14 @@
     <!-- 筛选 + 生成 -->
     <div class="toolbar">
       <el-date-picker v-model="queryDate" type="date" placeholder="配送日期" value-format="YYYY-MM-DD" class="filter-item" />
-      <el-select v-model="query.classId" placeholder="全部班级" clearable filterable class="filter-item">
-        <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
-      </el-select>
+      <GradeClassFilter v-model="query.classId" @change="fetchList" />
       <el-select v-model="query.status" placeholder="全部状态" clearable class="filter-item">
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
       <el-button type="primary" @click="fetchList">查询</el-button>
       <el-button @click="handleReset">重置</el-button>
       <div class="spacer" />
+      <el-button v-if="isAdmin" type="danger" :icon="CircleClose" @click="openStockout">缺货取消</el-button>
       <el-button type="success" :icon="Refresh" @click="openGenerate">生成配送任务</el-button>
     </div>
 
@@ -50,6 +49,30 @@
       />
     </div>
 
+    <!-- 缺货批量取消对话框 -->
+    <el-dialog v-model="stockoutVisible" title="配送前缺货批量取消" width="480px">
+      <el-alert type="warning" :closable="false"
+        title="仅取消所选日期+奶品的「待配送」任务；已完成/配送中任务不受影响，零散订单当日配额自动回补，主订阅照常。" />
+      <el-form label-width="80px" style="margin-top: 14px">
+        <el-form-item label="配送日期" required>
+          <el-date-picker v-model="stockoutForm.deliveryDate" type="date" placeholder="选择日期"
+            value-format="YYYY-MM-DD" class="full-width" />
+        </el-form-item>
+        <el-form-item label="奶品" required>
+          <el-select v-model="stockoutForm.productId" placeholder="选择奶品" filterable class="full-width">
+            <el-option v-for="p in productOptions" :key="p.id" :label="`${p.productName}（${p.spec || ''}）`" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="原因">
+          <el-input v-model="stockoutForm.reason" placeholder="选填，如：供应商断供" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="stockoutVisible = false">取消</el-button>
+        <el-button type="danger" :loading="stockouting" @click="handleStockout">确认取消</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 生成任务对话框 -->
     <el-dialog v-model="generateVisible" title="生成配送任务" width="420px">
       <el-form label-width="80px">
@@ -57,9 +80,7 @@
           <el-date-picker v-model="generateDate" type="date" placeholder="选择日期" value-format="YYYY-MM-DD" class="full-width" />
         </el-form-item>
         <el-form-item label="班级">
-          <el-select v-model="generateClassId" placeholder="不选则全部班级" clearable class="full-width">
-            <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
-          </el-select>
+          <GradeClassFilter v-model="generateClassId" class="full-width" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -72,13 +93,15 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, CircleClose } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import {
-  getDeliveryTaskList, generateDeliveryTasks, startDeliveryTask, cancelDeliveryTask
+  getDeliveryTaskList, generateDeliveryTasks, startDeliveryTask, cancelDeliveryTask,
+  stockoutCancelTasks
 } from '@/api/delivery'
-import { getAllClass } from '@/api/clazz'
+import { getProductList } from '@/api/product'
+import GradeClassFilter from '@/views/clazz/components/GradeClassFilter.vue'
 
 // 开始配送由管理员/配送站执行（配送任务开始配送会联动订单并触发退款闸门），班主任只读+签收
 const userStore = useUserStore()
@@ -89,7 +112,6 @@ const emit = defineEmits<{ (e: 'view-records', task: any): void }>()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const total = ref(0)
-const classList = ref<any[]>([])
 const queryDate = ref('')
 const generateVisible = ref(false)
 const generateDate = ref('')
@@ -113,7 +135,6 @@ const taskStatusTag = (s: number): any => {
   const map: Record<number, string> = { 1: 'warning', 2: 'primary', 3: 'success', 4: 'danger' }
   return map[s] ?? 'info'
 }
-const classLabel = (c: any) => c.gradeName ? `${c.gradeName} · ${c.className}` : c.className
 
 async function fetchList() {
   loading.value = true
@@ -127,11 +148,6 @@ async function fetchList() {
   } finally {
     loading.value = false
   }
-}
-
-async function fetchClasses() {
-  const res: any = await getAllClass()
-  classList.value = res.data
 }
 
 function handleReset() {
@@ -184,8 +200,53 @@ function viewRecords(row: any) {
   emit('view-records', row)
 }
 
+// ==================== 缺货批量取消 ====================
+const stockoutVisible = ref(false)
+const stockouting = ref(false)
+const productOptions = ref<any[]>([])
+const stockoutForm = reactive({
+  deliveryDate: '',
+  productId: undefined as number | undefined,
+  reason: ''
+})
+
+function openStockout() {
+  stockoutForm.deliveryDate = queryDate.value || ''
+  stockoutForm.productId = undefined
+  stockoutForm.reason = ''
+  if (!productOptions.value.length) {
+    getProductList({ pageNum: 1, pageSize: 999 }).then((res: any) => {
+      productOptions.value = (res.data && res.data.list) || res.data || []
+    }).catch(() => {})
+  }
+  stockoutVisible.value = true
+}
+
+async function handleStockout() {
+  if (!stockoutForm.deliveryDate) {
+    ElMessage.warning('请选择配送日期')
+    return
+  }
+  if (!stockoutForm.productId) {
+    ElMessage.warning('请选择奶品')
+    return
+  }
+  stockouting.value = true
+  try {
+    const res: any = await stockoutCancelTasks({
+      deliveryDate: stockoutForm.deliveryDate,
+      productId: stockoutForm.productId,
+      reason: stockoutForm.reason || undefined
+    })
+    ElMessage.success(`已取消 ${res.data} 条待配送任务`)
+    stockoutVisible.value = false
+    fetchList()
+  } finally {
+    stockouting.value = false
+  }
+}
+
 onMounted(() => {
-  fetchClasses()
   fetchList()
 })
 </script>

@@ -2,9 +2,7 @@
   <div class="order-manage">
     <!-- 筛选栏 -->
     <div class="search-bar">
-      <el-select v-model="query.classId" placeholder="全部班级" clearable filterable class="filter-select" @change="handleSearch">
-        <el-option v-for="c in classList" :key="c.id" :label="classLabel(c)" :value="c.id" />
-      </el-select>
+      <GradeClassFilter v-model="query.classId" @change="handleSearch" />
       <el-select v-model="query.status" placeholder="全部状态" clearable class="filter-select" @change="handleSearch">
         <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
@@ -75,14 +73,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getOrderList, payOrder, cancelOrder, completeOrder
 } from '@/api/order'
-import { getAllClass } from '@/api/clazz'
+import GradeClassFilter from '@/views/clazz/components/GradeClassFilter.vue'
 import OrderCreateDialog from './components/OrderCreateDialog.vue'
 import OrderDetailDrawer from './components/OrderDetailDrawer.vue'
 
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const total = ref(0)
-const classList = ref<any[]>([])
 const dateRange = ref<[string, string] | null>(null)
 
 const query = reactive({
@@ -105,7 +102,6 @@ const statusTag = (s: number): any => {
   const map: Record<number, string> = { 1: 'warning', 2: 'primary', 3: 'info', 4: 'success', 5: 'danger' }
   return map[s] ?? 'info'
 }
-const classLabel = (c: any) => c.gradeName ? `${c.gradeName} · ${c.className}` : c.className
 
 async function fetchList() {
   loading.value = true
@@ -116,11 +112,6 @@ async function fetchList() {
   } finally {
     loading.value = false
   }
-}
-
-async function fetchClasses() {
-  const res: any = await getAllClass()
-  classList.value = res.data
 }
 
 function handleSearch() {
@@ -194,7 +185,6 @@ function onCreated() {
 }
 
 onMounted(() => {
-  fetchClasses()
   fetchList()
 })
 </script>

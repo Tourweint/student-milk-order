@@ -3,6 +3,7 @@ package com.milk.order.module.delivery.service;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.milk.order.module.delivery.dto.SignRequest;
+import com.milk.order.module.delivery.dto.StockoutCancelRequest;
 import com.milk.order.module.delivery.entity.DeliveryRecord;
 import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
@@ -47,6 +48,13 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
 
     /** 取消任务（待配送/配送中→已取消） */
     void cancelTask(Long taskId, String reason);
+
+    /**
+     * 配送前缺货批量取消：取消某配送日期某奶品的全部「待配送」任务（单期子订单取消）。
+     * 已完成/配送中任务不受影响（禁止回退）；关联零散订单当日配额按台账回补；
+     * 不影响主订阅计划（下期续订照常）；订单任务全部终态时自动完成。返回取消任务数。
+     */
+    int stockoutCancel(StockoutCancelRequest request);
 
     /** 签收（未签收→已签收，任务→已完成，同时生成营养摄入记录）；仅可签收已开始配送（已送出）的任务 */
     void signRecord(SignRequest request);

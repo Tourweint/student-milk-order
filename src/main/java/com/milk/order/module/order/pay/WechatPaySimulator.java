@@ -34,10 +34,11 @@ import java.util.concurrent.TimeUnit;
  *
  * 模拟链路：
  * 1. unifiedOrder：商户（本系统）调统一下单，微信侧签发预支付凭证 prepayId 与调起签名参数
- * 2. confirmPay：用户在微信侧确认扣款（由前端调模拟接口触发）
- * 3. confirmPay 后异步 POST 签名回调报文到商户通知地址，由 WechatPayNotifyController 验签处理
+ * 2. confirmPay：用户在微信侧确认扣款（由前端调模拟接口触发）；扣款结果记入支付单存储
+ * 3. 异步 POST 签名回调报文到商户通知地址，失败按指数退避重试（对齐微信重试节奏）；
+ *    重试仍失败不丢数据——商户可通过查单（queryOrder）对账补偿
  *
- * 仅限本地/演示环境使用；预支付单保存在内存中，重启后未完成的预支付单失效（重新发起支付即可）。
+ * 仅限本地/演示环境使用；预支付单与支付单保存在内存中，重启后失效（重新发起支付即可）。
  */
 @Slf4j
 @Component
@@ -49,7 +50,10 @@ public class WechatPaySimulator {
     /** 已签发的预支付单：prepayId -> 预支付信息（模拟微信侧的预支付单存储） */
     private final Map<String, PendingPrepay> prepayStore = new ConcurrentHashMap<>();
 
-    /** 模拟微信异步通知的调度线程 */
+    /** 已扣款支付单：outTradeNo -> 支付结果（模拟微信侧支付订单存储，供查单/对账） */
+    private final Map<String, PaidOrder> paidStore = new ConcurrentHashMap<>();
+
+    /** 模拟微信异步通知的调度线程（单线程保证同一订单回调串行到达） */
     private final ScheduledExecutorService notifyExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "wxpay-mock-notify");
         t.setDaemon(true);
@@ -58,15 +62,29 @@ public class WechatPaySimulator {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
+    /** 演示环境内存上限：超过后清空支付单存储，避免长期运行膨胀 */
+    private static final int PAID_STORE_MAX = 5000;
+
     private final RestTemplate restTemplate = buildRestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 预支付单（模拟微信侧） */
     @Data
     public static class PendingPrepay {
+        private String prepayId;
         private String outTradeNo;
         private BigDecimal amount;
         private Long orderId;
+    }
+
+    /** 已扣款支付单（模拟微信侧支付订单，查单/对账依据） */
+    @Data
+    public static class PaidOrder {
+        private String outTradeNo;
+        private Long orderId;
+        private BigDecimal amount;
+        private String transactionId;
+        private LocalDateTime payTime;
     }
 
     /**
@@ -81,6 +99,7 @@ public class WechatPaySimulator {
                 + ThreadLocalRandom.current().nextInt(100000, 999999);
 
         PendingPrepay prepay = new PendingPrepay();
+        prepay.setPrepayId(prepayId);
         prepay.setOutTradeNo(order.getOrderNo());
         prepay.setAmount(order.getPayAmount());
         prepay.setOrderId(order.getId());
@@ -102,7 +121,7 @@ public class WechatPaySimulator {
     }
 
     /**
-     * 模拟用户在微信侧确认扣款：成功后微信异步回调商户通知地址
+     * 模拟用户在微信侧确认扣款：扣款结果先落支付单存储，再异步回调商户通知地址
      *
      * @return false 表示预支付单不存在或已消费（过期/重复确认）
      */
@@ -111,21 +130,46 @@ public class WechatPaySimulator {
         if (prepay == null) {
             return false;
         }
-        // 模拟微信收到扣款成功后，异步推送支付结果到商户通知地址
-        notifyExecutor.schedule(() -> sendNotify(prepay),
+        // 微信侧先记支付单（查单依据），再通知商户——与真实链路一致：
+        // 即使回调全部丢失，商户查单仍能拿到支付成功结果
+        PaidOrder paid = new PaidOrder();
+        paid.setOutTradeNo(prepay.getOutTradeNo());
+        paid.setOrderId(prepay.getOrderId());
+        paid.setAmount(prepay.getAmount());
+        paid.setTransactionId("TX" + System.currentTimeMillis()
+                + ThreadLocalRandom.current().nextInt(1000, 9999));
+        paid.setPayTime(LocalDateTime.now());
+        if (paidStore.size() > PAID_STORE_MAX) {
+            paidStore.clear();
+        }
+        paidStore.put(paid.getOutTradeNo(), paid);
+
+        notifyExecutor.schedule(() -> sendNotifyWithRetry(paid, 0),
                 properties.getNotifyDelayMs(), TimeUnit.MILLISECONDS);
         return true;
     }
 
-    /** 发送签名回调报文到商户通知地址 */
-    private void sendNotify(PendingPrepay prepay) {
+    /**
+     * 模拟微信查单接口：商户主动查询订单在微信侧的支付结果
+     *
+     * @return null 表示微信侧无该订单的扣款记录（未支付）；非空为已扣款（含回调未送达/送达失败）
+     */
+    public PaidOrder queryOrder(String outTradeNo) {
+        return outTradeNo == null ? null : paidStore.get(outTradeNo);
+    }
+
+    /**
+     * 发送签名回调报文到商户通知地址；失败按指数退避重试（1s/2s/4s/8s/16s，对齐微信重试节奏）。
+     * 重试耗尽后支付单仍保留在微信侧存储中，商户对账任务/查单接口可补偿。
+     */
+    private void sendNotifyWithRetry(PaidOrder paid, int attempt) {
+        boolean success = false;
         try {
             WechatPayNotifyRequest body = new WechatPayNotifyRequest();
-            body.setOutTradeNo(prepay.getOutTradeNo());
-            body.setTransactionId("TX" + System.currentTimeMillis()
-                    + ThreadLocalRandom.current().nextInt(1000, 9999));
-            body.setAmount(prepay.getAmount());
-            body.setPayTime(LocalDateTime.now().format(TIME_FMT));
+            body.setOutTradeNo(paid.getOutTradeNo());
+            body.setTransactionId(paid.getTransactionId());
+            body.setAmount(paid.getAmount());
+            body.setPayTime(paid.getPayTime().format(TIME_FMT));
             body.setResultCode("SUCCESS");
 
             String json = objectMapper.writeValueAsString(body);
@@ -135,13 +179,28 @@ public class WechatPaySimulator {
             headers.set("Wechatpay-Signature", hmacSha256(json));
             ResponseEntity<String> resp = restTemplate.postForEntity(
                     properties.getNotifyUrl(), new HttpEntity<>(json, headers), String.class);
-            log.info("[模拟微信支付] 回调商户通知地址完成，outTradeNo={}，商户响应={}",
-                    prepay.getOutTradeNo(), resp.getBody());
+            // 与微信应答约定一致：HTTP 200 且报文 SUCCESS 才算送达，其余一律视为失败进入重试
+            success = resp.getStatusCode().is2xxSuccessful() && "SUCCESS".equals(resp.getBody());
+            if (success) {
+                log.info("[模拟微信支付] 回调商户通知地址完成，outTradeNo={}，商户响应={}",
+                        paid.getOutTradeNo(), resp.getBody());
+                return;
+            }
+            log.warn("[模拟微信支付] 回调商户应答非 SUCCESS，outTradeNo={}，响应={}",
+                    paid.getOutTradeNo(), resp.getBody());
         } catch (Exception e) {
-            // 通知失败：订单保持待支付，用户可重新发起支付（与真实链路一致，微信会重试通知）
-            log.error("[模拟微信支付] 回调商户通知地址失败，outTradeNo={}，原因：{}",
-                    prepay.getOutTradeNo(), e.getMessage());
+            log.warn("[模拟微信支付] 回调商户通知地址失败，outTradeNo={}，第 {} 次尝试：{}",
+                    paid.getOutTradeNo(), attempt + 1, e.getMessage());
         }
+        if (attempt >= properties.getNotifyMaxRetries()) {
+            log.error("[模拟微信支付] 回调重试耗尽（共 {} 次），outTradeNo={}；"
+                            + "订单保持待支付，等待商户查单对账补偿（对应真实链路微信持续重试+商户对账）",
+                    attempt + 1, paid.getOutTradeNo());
+            return;
+        }
+        long backoffMs = properties.getNotifyRetryBaseMs() * (1L << attempt);
+        notifyExecutor.schedule(() -> sendNotifyWithRetry(paid, attempt + 1),
+                backoffMs, TimeUnit.MILLISECONDS);
     }
 
     /** 验证回调报文签名（商户端调用） */

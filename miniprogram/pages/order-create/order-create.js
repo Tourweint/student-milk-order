@@ -129,7 +129,14 @@ Page({
     if (this.mode === 'package') return
     const index = Number(e.currentTarget.dataset.index)
     const items = this.data.items.slice()
-    items[index].quantity += 1
+    const item = items[index]
+    // 已知当日余量时按余量封顶，提前给反馈（未设配额的品种不限制）
+    const remaining = this.data.quotaMap[item.productId]
+    if (remaining !== undefined && item.quantity + 1 > remaining) {
+      wx.showToast({ title: '该奶品当日仅剩 ' + remaining + ' 盒', icon: 'none' })
+      return
+    }
+    item.quantity += 1
     this.setData({ items, total: this.calcTotal(items), totalBoxes: this.calcTotalBoxes(items) })
   },
 
@@ -218,6 +225,15 @@ Page({
     if (this.data.endDate < this.data.startDate) {
       wx.showToast({ title: '结束日期不能早于开始日期', icon: 'none' })
       return
+    }
+    // 提交前按当日余量校验（未设配额的品种不限制），避免下单后才被驳回
+    for (let i = 0; i < items.length; i++) {
+      const x = items[i]
+      const remaining = this.data.quotaMap[x.productId]
+      if (remaining !== undefined && x.quantity > remaining) {
+        wx.showToast({ title: '「' + x.name + '」当日仅剩 ' + remaining + ' 盒，请调整数量', icon: 'none' })
+        return
+      }
     }
 
     this.setData({ submitting: true })

@@ -31,4 +31,7 @@ public interface DailyQuotaService extends IService<DailyQuota> {
 
     /** 按台账回补某订单占用的配额（退订时使用） */
     void restore(Long orderId);
+
+    /** 按订单+品种+日期回补配额（缺货取消单期任务时使用：只回补该日期该品种的份额，不影响订单其他期次） */
+    void restoreForOrderProductDate(Long orderId, Long productId, LocalDate quotaDate);
 }

@@ -87,7 +87,7 @@
       <view class="line-item" wx:for="{{items}}" wx:key="productId">
         <view class="line-info">
           <view class="line-name">{{item.name}}</view>
-          <view class="line-meta {{item.quantity > quotaMap[item.productId] ? 'line-insufficient' : ''}}">{{item.spec || ''}} · ¥{{item.price}}/盒 · 剩 {{quotaMap[item.productId] || 0}} 盒</view>
+          <view class="line-meta {{item.quantity > quotaMap[item.productId] ? 'line-insufficient' : ''}}">{{item.spec || ''}} · ¥{{item.price}}/盒<text wx:if="{{quotaMap[item.productId] !== undefined}}"> · 剩 {{quotaMap[item.productId]}} 盒</text></view>
         </view>
         <view class="stepper">
           <view class="stepper-btn" bindtap="decrease" data-index="{{index}}">−</view>

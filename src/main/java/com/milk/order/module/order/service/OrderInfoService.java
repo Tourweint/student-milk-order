@@ -35,6 +35,15 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 处理微信支付回调通知（验签后调用）：校验金额、扣库存、更新支付流水与订单状态，幂等 */
     boolean handleWechatPayNotify(WechatPayNotifyRequest notify);
 
+    /** 支付结果查单（模拟）：待支付订单主动向微信侧查单，回调丢失时补偿落账；返回订单当前状态码 */
+    Integer queryPayResult(Long id);
+
+    /** 支付对账补偿（定时任务）：扫描存在在途待支付流水的订单，逐单查单补偿，返回补偿落账数量 */
+    int reconcilePendingPayments();
+
+    /** 待支付订单超时自动取消：先查单防误杀（已扣款则补偿落账），再按状态机规则 CAS 取消；返回是否取消 */
+    boolean cancelTimeoutOrder(Long id, int timeoutMinutes);
+
     /** 退订（待支付/已支付可退；已支付的退订回库） */
     void cancelOrder(Long id, String reason);
 

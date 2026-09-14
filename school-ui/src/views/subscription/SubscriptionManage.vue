@@ -4,6 +4,7 @@
     <div class="toolbar">
       <el-select v-model="query.status" placeholder="全部状态" clearable class="filter-item" @change="handleSearch">
         <el-option label="已开启" :value="1" />
+        <el-option label="已暂停" :value="2" />
         <el-option label="已关闭" :value="0" />
       </el-select>
       <el-button type="primary" @click="fetchList">查询</el-button>
@@ -22,18 +23,19 @@
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.statusText }}</el-tag>
+          <el-tag :type="row.status === 1 ? 'success' : row.status === 2 ? 'warning' : 'info'" size="small">{{ row.statusText }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="nextRenewalTime" label="下次续订" min-width="160" />
       <el-table-column prop="lastRenewalTime" label="上次续订" min-width="160">
         <template #default="{ row }">{{ row.lastRenewalTime || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="230" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.status === 1" link type="warning" @click="handleTrigger(row)">手动续订</el-button>
-          <el-button v-if="row.status === 1" link type="danger" @click="handleClose(row)">关闭</el-button>
-          <el-button v-else link type="primary" @click="handleReopen(row)">重新开启</el-button>
+          <el-button v-if="row.status === 1" link type="primary" @click="handlePause(row)">暂停</el-button>
+          <el-button v-if="row.status === 2" link type="success" @click="handleResume(row)">恢复</el-button>
+          <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleClose(row)">关闭</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -55,7 +57,9 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="学生" prop="studentId">
           <el-select v-model="form.studentId" placeholder="选择学生" filterable class="full-width" @change="onStudentChange">
-            <el-option v-for="s in studentList" :key="s.id" :label="`${s.studentName}（${s.studentNo}）`" :value="s.id" />
+            <el-option-group v-for="g in groupedStudents" :key="g.className" :label="g.className">
+              <el-option v-for="s in g.students" :key="s.id" :label="`${s.studentName}（${s.studentNo}）`" :value="s.id" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="原订单" prop="originalOrderId">
@@ -83,15 +87,58 @@
         <el-button type="primary" :loading="creating" @click="handleCreate">开启</el-button>
       </template>
     </el-dialog>
+
+    <!-- 暂停续订对话框 -->
+    <el-dialog v-model="pauseVisible" title="暂停自动续订" width="460px">
+      <el-alert type="info" :closable="false"
+        title="暂停期间不再自动续订；已生成的配送任务默认照常送完（已支付权益）。" />
+      <el-form label-width="90px" style="margin-top: 14px">
+        <el-form-item label="暂停原因">
+          <el-input v-model="pauseForm.reason" placeholder="选填，如：放假暂停" />
+        </el-form-item>
+        <el-form-item label="未配送任务">
+          <el-radio-group v-model="pauseForm.keepPendingTasks">
+            <el-radio :value="true">保留照常配送</el-radio>
+            <el-radio :value="false">同时取消（该期不送）</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pauseVisible = false">取消</el-button>
+        <el-button type="warning" :loading="pausing" @click="submitPause">确认暂停</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 关闭续订对话框（终止时机二选一） -->
+    <el-dialog v-model="closeVisible" title="关闭自动续订（终止订阅）" width="500px">
+      <el-form label-width="90px">
+        <el-form-item label="终止时机">
+          <el-radio-group v-model="closeForm.terminateNow">
+            <div style="display: flex; flex-direction: column; gap: 8px">
+              <el-radio :value="false">送完当前周期：已生成的配送任务照常执行，仅停止后续续订</el-radio>
+              <el-radio :value="true">立即终止：同时取消当前周期未配送任务（剩余期次线下退款）</el-radio>
+            </div>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="原因">
+          <el-input v-model="closeForm.reason" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="closeVisible = false">取消</el-button>
+        <el-button type="danger" :loading="closing" @click="submitClose">确认关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
-  getSubscriptionList, createSubscription, deleteSubscription, triggerSubscription
+  getSubscriptionList, createSubscription, deleteSubscription, triggerSubscription,
+  pauseSubscription, resumeSubscription
 } from '@/api/subscription'
 import { getStudentList } from '@/api/student'
 import { getOrderList } from '@/api/order'
@@ -110,6 +157,21 @@ const formRef = ref<FormInstance>()
 const query = reactive({
   pageNum: 1, pageSize: 10,
   status: undefined as number | undefined
+})
+
+/** 学生按班级分组展示，长列表下更容易定位 */
+const groupedStudents = computed(() => {
+  const groups: { className: string; students: any[] }[] = []
+  studentList.value.forEach((s) => {
+    const className = s.className || '未分班'
+    let g = groups.find((x) => x.className === className)
+    if (!g) {
+      g = { className, students: [] }
+      groups.push(g)
+    }
+    g.students.push(s)
+  })
+  return groups
 })
 
 const form = reactive({
@@ -198,16 +260,65 @@ async function handleTrigger(row: any) {
   fetchList()
 }
 
-async function handleClose(row: any) {
-  await ElMessageBox.confirm(`确定关闭「${row.studentName}」的自动续订吗？`, '提示', { type: 'warning' })
-  await deleteSubscription(row.id)
-  ElMessage.success('已关闭')
+/** 暂停：默认保留未配送任务，对话框内可选同时取消 */
+const pauseVisible = ref(false)
+const pausing = ref(false)
+const pauseTarget = ref<any>(null)
+const pauseForm = reactive({ reason: '', keepPendingTasks: true })
+
+function handlePause(row: any) {
+  pauseTarget.value = row
+  pauseForm.reason = ''
+  pauseForm.keepPendingTasks = true
+  pauseVisible.value = true
+}
+
+async function submitPause() {
+  if (!pauseTarget.value) return
+  pausing.value = true
+  try {
+    await pauseSubscription(pauseTarget.value.id, pauseForm.reason || undefined, pauseForm.keepPendingTasks)
+    ElMessage.success('已暂停，期间不自动续订')
+    pauseVisible.value = false
+    fetchList()
+  } finally {
+    pausing.value = false
+  }
+}
+
+async function handleResume(row: any) {
+  await ElMessageBox.confirm(
+    `恢复后将从下一个续订时间点继续自动续订（时间已顺延），确定恢复「${row.studentName}」的续订吗？`,
+    '恢复续订', { type: 'warning' })
+  await resumeSubscription(row.id)
+  ElMessage.success('已恢复')
   fetchList()
 }
 
-async function handleReopen(row: any) {
-  // 重新开启：直接修改状态为1
-  ElMessage.info('请通过"开启自动续订"创建新计划')
+/** 关闭：对话框内选择终止时机（送完当前周期 / 立即取消未配送任务） */
+const closeVisible = ref(false)
+const closing = ref(false)
+const closeTarget = ref<any>(null)
+const closeForm = reactive({ terminateNow: false, reason: '' })
+
+function handleClose(row: any) {
+  closeTarget.value = row
+  closeForm.terminateNow = false
+  closeForm.reason = ''
+  closeVisible.value = true
+}
+
+async function submitClose() {
+  if (!closeTarget.value) return
+  closing.value = true
+  try {
+    await deleteSubscription(closeTarget.value.id, closeForm.terminateNow, closeForm.reason || undefined)
+    ElMessage.success(closeForm.terminateNow ? '已关闭并取消未配送任务' : '已关闭，当前周期将执行完毕')
+    closeVisible.value = false
+    fetchList()
+  } finally {
+    closing.value = false
+  }
 }
 
 onMounted(() => {

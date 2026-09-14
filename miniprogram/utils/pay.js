@@ -39,13 +39,17 @@ async function requestWechatPay(orderId) {
   // 3. 用户确认扣款：由模拟微信侧受理，触发异步回调后端通知地址
   await payApi.confirmWechatPay(params.prepayId)
 
-  // 4. 轮询订单状态，等待后端收到回调并更新为已支付
+  // 4. 轮询支付结果：调查单接口（已扣款但回调丢失时后端会在此处补偿落账），
+  //    比只读订单详情更稳——回调全部丢失时前端这一轮也能把订单推成已支付
   for (let i = 0; i < POLL_MAX_TIMES; i++) {
     await sleep(POLL_INTERVAL_MS)
     try {
-      const order = await orderApi.getOrderDetail(orderId)
-      if (order.status === 2) {
+      const status = await orderApi.getPayResult(orderId)
+      if (status === 2) {
         return { paid: true }
+      }
+      if (status === 5) {
+        return { paid: false, message: '订单已取消，本次支付未完成' }
       }
     } catch (e) {
       // 单次轮询失败（如网络抖动）不中断，继续等待

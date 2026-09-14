@@ -2,9 +2,7 @@
   <div class="student-manage">
     <!-- 搜索栏 -->
     <div class="search-bar">
-      <el-select v-model="query.classId" placeholder="全部班级" clearable filterable class="filter-select" @change="handleSearch">
-        <el-option v-for="c in allClass" :key="c.id" :label="classLabel(c)" :value="c.id" />
-      </el-select>
+      <GradeClassFilter v-model="query.classId" @change="handleSearch" />
       <el-input
         v-model="query.keyword"
         placeholder="学号 / 姓名 / 家长 / 家长电话"
@@ -81,7 +79,9 @@
         </el-form-item>
         <el-form-item label="班级" prop="classId">
           <el-select v-model="form.classId" placeholder="请选择班级" filterable style="width: 100%">
-            <el-option v-for="c in allClass" :key="c.id" :label="classLabel(c)" :value="c.id" />
+            <el-option-group v-for="g in groupedClass" :key="g.grade" :label="g.grade">
+              <el-option v-for="c in g.classes" :key="c.id" :label="c.className" :value="c.id" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="家长姓名">
@@ -108,7 +108,9 @@
       <el-form label-width="90px">
         <el-form-item label="导入班级" required>
           <el-select v-model="importClassId" placeholder="请先选择班级" filterable style="width: 100%">
-            <el-option v-for="c in allClass" :key="c.id" :label="classLabel(c)" :value="c.id" />
+            <el-option-group v-for="g in groupedClass" :key="g.grade" :label="g.grade">
+              <el-option v-for="c in g.classes" :key="c.id" :label="c.className" :value="c.id" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="选择文件">
@@ -149,7 +151,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Plus, Upload, Download, Search } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadInstance, type UploadFile } from 'element-plus'
 import {
@@ -157,6 +159,7 @@ import {
   importStudents, downloadStudentTemplate
 } from '@/api/student'
 import { getAllClass } from '@/api/clazz'
+import GradeClassFilter from '@/views/clazz/components/GradeClassFilter.vue'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -182,9 +185,20 @@ async function fetchAllClass() {
   allClass.value = res.data
 }
 
-function classLabel(c: any): string {
-  return c.gradeName ? `${c.gradeName} · ${c.className}` : c.className
-}
+/** 按年级分组，供弹窗内班级下拉使用 */
+const groupedClass = computed(() => {
+  const groups: { grade: string; classes: any[] }[] = []
+  allClass.value.forEach((c) => {
+    const grade = c.gradeName || '未分年级'
+    let g = groups.find((x) => x.grade === grade)
+    if (!g) {
+      g = { grade, classes: [] }
+      groups.push(g)
+    }
+    g.classes.push(c)
+  })
+  return groups
+})
 
 function genderText(gender: number | null): string {
   if (gender === 1) return '男'
@@ -324,10 +338,6 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   margin-bottom: 16px;
-
-  .filter-select {
-    width: 200px;
-  }
 
   .search-input {
     width: 280px;
