@@ -3,7 +3,7 @@
     <!-- 侧边栏 -->
     <el-aside :width="isCollapse ? '64px' : '220px'" class="sidebar">
       <div class="logo">
-        <el-icon :size="24" color="#fff"><Milk /></el-icon>
+        <el-icon :size="24" color="#fff"><MilkTea /></el-icon>
         <span v-show="!isCollapse" class="logo-text">学生奶订购系统</span>
       </div>
       <el-menu

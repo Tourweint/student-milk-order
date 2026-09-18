@@ -23,4 +23,7 @@ public class DashboardVO implements Serializable {
     /** 库存预警数 */
     /** 今日机动配额剩余（单日零散订购可售盒数；学期套餐不占配额） */
     private Long todayQuotaRemaining;
+
+    /** 今日待签收配送记录数（已送出未签收；班主任限本班，管理员全局） */
+    private Long pendingSignCount;
 }

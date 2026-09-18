@@ -9,6 +9,7 @@ import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.PendingSignVO;
 import com.milk.order.module.order.entity.OrderInfo;
 
 import java.util.List;
@@ -68,4 +69,22 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     /** 配送记录分页（日期/班级/学生/签收状态筛选） */
     IPage<DeliveryRecordVO> pageRecords(Long pageNum, Long pageSize, String deliveryDate, Long classId,
                                          Long studentId, Integer signStatus);
+
+    /**
+     * 自动签收兜底候选：返回配送日期早于 today、任务已送出（配送中）且记录未签收的配送记录 ID。
+     * 供次日凌晨定时任务批量调用（单条独立事务处理，单条失败不影响其余）。
+     */
+    List<Long> listExpiredAutoSignRecordIds(int limit);
+
+    /**
+     * 单条自动签收（独立事务、幂等）：仅签收「配送日期早于 today + 任务已送出 + 记录未签收」的记录，
+     * 签收人标记为系统自动签收；不满足任一前置条件（含已处理）静默跳过，不抛异常。
+     */
+    void autoSignOne(Long recordId);
+
+    /**
+     * 某配送日期（默认今天）「已送出未签收」待签收汇总：按班级聚合记录数；
+     * 班主任数据范围强制限定本班，管理员/配送站可看全部班级。返回 total 与班级明细。
+     */
+    PendingSignVO pendingSign(String deliveryDate);
 }

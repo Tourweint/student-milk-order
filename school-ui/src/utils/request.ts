@@ -42,6 +42,10 @@ service.interceptors.response.use(
     return res
   },
   (error) => {
+    // 后端未就绪时的代理/网络层错误：静默交由 request 层自动重试，不弹错误提示
+    if (isRetryableError(error)) {
+      return Promise.reject(error)
+    }
     if (error.response?.status === 401) {
       ElMessage.error('登录已过期，请重新登录')
       localStorage.removeItem('token')
@@ -54,9 +58,40 @@ service.interceptors.response.use(
   }
 )
 
+/** GET 请求在「后端未就绪」窗口期（代理/网络层错误）的自动重试配置 */
+const RETRY_TIMES = 5
+const RETRY_DELAY_MS = 2000
+
+/**
+ * 是否为可重试的代理/网络层错误：
+ * - 无响应（直连后端被拒，如 ECONNREFUSED）
+ * - vite 代理返回 500 且响应体不是业务 ApiResponse 格式（后端尚未监听时的代理错误）
+ * 业务 500（有 code 字段）不重试，避免掩盖真实错误。
+ */
+function isRetryableError(error: any): boolean {
+  if (!error?.response) return true
+  const data = error.response.data
+  const isBusiness = data && typeof data === 'object' && 'code' in data
+  return error.response.status === 500 && !isBusiness
+}
+
 // 封装请求方法
 export function request<T = any>(config: AxiosRequestConfig): Promise<T> {
-  return service.request<any, T>(config)
+  return doRequest<T>(config, RETRY_TIMES)
+}
+
+/** 带自动重试的请求：仅 GET（幂等）在可重试错误下等待后重试；POST/PUT/DELETE 不重试，避免重复提交副作用 */
+function doRequest<T>(config: AxiosRequestConfig, retriesLeft: number): Promise<T> {
+  return service.request(config)
+    .then((res) => res as T)
+    .catch((error: any) => {
+      const isGet = !config.method || config.method.toUpperCase() === 'GET'
+      if (isGet && isRetryableError(error) && retriesLeft > 0) {
+        return new Promise<T>((resolve) => setTimeout(resolve, RETRY_DELAY_MS))
+          .then(() => doRequest<T>(config, retriesLeft - 1))
+      }
+      throw error
+    })
 }
 
 export function get<T = any>(url: string, params?: any, config?: AxiosRequestConfig): Promise<T> {

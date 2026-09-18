@@ -13,10 +13,13 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import DeliveryTaskTab from './components/DeliveryTaskTab.vue'
 import DeliveryRecordTab from './components/DeliveryRecordTab.vue'
 
-const activeTab = ref('task')
+const route = useRoute()
+// 支持看板/提醒入口带 ?tab=record 直达配送记录页（今日待签收一键签收）
+const activeTab = ref(route.query.tab === 'record' ? 'record' : 'task')
 </script>
 
 <style scoped lang="scss">

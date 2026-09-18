@@ -2,7 +2,7 @@
   <div class="login-container">
     <div class="login-box">
       <div class="login-header">
-        <el-icon :size="40" color="#409eff"><Milk /></el-icon>
+        <el-icon :size="40" color="#409eff"><MilkTea /></el-icon>
         <h1 class="login-title">学生奶订购系统</h1>
         <p class="login-subtitle">Student Milk Order Management System</p>
       </div>

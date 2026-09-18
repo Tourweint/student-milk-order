@@ -5,6 +5,10 @@ import com.milk.order.module.clazz.entity.ClassInfo;
 import com.milk.order.module.clazz.entity.Student;
 import com.milk.order.module.clazz.mapper.ClassInfoMapper;
 import com.milk.order.module.clazz.mapper.StudentMapper;
+import com.milk.order.module.delivery.entity.DeliveryRecord;
+import com.milk.order.module.delivery.entity.DeliveryTask;
+import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
+import com.milk.order.module.delivery.mapper.DeliveryTaskMapper;
 import com.milk.order.module.nutrition.entity.NutritionIntake;
 import com.milk.order.module.nutrition.mapper.NutritionIntakeMapper;
 import com.milk.order.module.order.entity.OrderInfo;
@@ -22,6 +26,8 @@ import com.milk.order.module.stats.vo.ClassRankingVO;
 import com.milk.order.module.stats.vo.CoverageVO;
 import com.milk.order.module.stats.vo.DashboardVO;
 import com.milk.order.module.stats.vo.TrendVO;
+import com.milk.order.module.user.dto.DataScope;
+import com.milk.order.module.user.service.DataScopeResolver;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -47,6 +53,9 @@ public class StatsServiceImpl implements StatsService {
     private final ProductCategoryMapper productCategoryMapper;
     private final DailyQuotaService dailyQuotaService;
     private final NutritionIntakeMapper nutritionIntakeMapper;
+    private final DeliveryTaskMapper deliveryTaskMapper;
+    private final DeliveryRecordMapper deliveryRecordMapper;
+    private final DataScopeResolver dataScopeResolver;
 
     private static final DateTimeFormatter DAY_FMT = DateTimeFormatter.ofPattern("MM-dd");
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
@@ -81,6 +90,24 @@ public class StatsServiceImpl implements StatsService {
 
         // 今日机动余量（全部品种合计，仅单日零散订购占用）
         vo.setTodayQuotaRemaining((long) dailyQuotaService.totalRemaining(java.time.LocalDate.now()));
+
+        // 今日待签收（已送出未签收的配送记录数；班主任限本班，管理员全局，与配送页待签收口径一致）
+        DataScope scope = dataScopeResolver.resolve();
+        Long scopeClassId = scope.getClassId();
+        List<DeliveryTask> todayTasks = deliveryTaskMapper.selectList(
+                new LambdaQueryWrapper<DeliveryTask>()
+                        .eq(DeliveryTask::getDeliveryDate, java.time.LocalDate.now())
+                        .eq(DeliveryTask::getStatus, 2)
+                        .eq(scopeClassId != null, DeliveryTask::getClassId, scopeClassId));
+        long pendingSignCount = 0;
+        if (!todayTasks.isEmpty()) {
+            pendingSignCount = deliveryRecordMapper.selectCount(
+                    new LambdaQueryWrapper<DeliveryRecord>()
+                            .in(DeliveryRecord::getTaskId,
+                                    todayTasks.stream().map(DeliveryTask::getId).collect(Collectors.toSet()))
+                            .eq(DeliveryRecord::getSignStatus, 2));
+        }
+        vo.setPendingSignCount(pendingSignCount);
 
         return vo;
     }

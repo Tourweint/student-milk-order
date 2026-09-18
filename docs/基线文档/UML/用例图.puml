@@ -1,0 +1,151 @@
+@startuml 学生奶订购系统-用例图
+' 用例图：学生奶订购系统（与 docs/基线文档/接口文档.md 一一对应）
+skinparam defaultFontName "Microsoft YaHei"
+skinparam usecase {
+  FontSize 11
+  BorderColor #4472C4
+  ArrowColor #555555
+}
+skinparam actor {
+  FontSize 12
+  BorderColor #2F5496
+}
+
+actor "家长\n（微信小程序）" as Parent
+actor "微信服务器" as WeChat
+
+usecase "账号密码登录" as UC1
+usecase "用户注册（限频）" as UC2
+usecase "微信授权登录\n（code换openid）" as UC3
+usecase "绑定学生\n（含家长姓名校验）" as UC4
+usecase "年级管理" as UC5
+usecase "班级管理" as UC6
+usecase "学生管理（增删改查）" as UC7
+usecase "Excel批量导入学生" as UC8
+usecase "下载导入模板" as UC9
+usecase "奶品品类管理" as UC10
+usecase "奶品管理" as UC11
+usecase "学期套餐管理" as UC12
+usecase "每日机动配额设置" as UC13
+usecase "浏览奶品/套餐" as UC14
+usecase "创建订单\n（散订/学期套餐）" as UC15
+usecase "微信支付\n（预下单+回调）" as UC16
+usecase "取消支付/退订" as UC17
+usecase "查看订单" as UC18
+usecase "完成订单" as UC19
+usecase "配送任务生成\n（自动/手工补生成）" as UC20
+usecase "开始配送\n（单条/今日已送出）" as UC21
+usecase "配送任务/记录查询" as UC22
+usecase "签收/批量签收" as UC23
+usecase "拒收" as UC24
+usecase "缺货批量取消" as UC25
+usecase "营养信息维护" as UC26
+usecase "营养摄入查询/汇总" as UC27
+usecase "数据看板/趋势/排行/覆盖率" as UC28
+usecase "开启/暂停/恢复/关闭续订" as UC29
+usecase "手动触发续订" as UC30
+usecase "用户与角色管理" as UC31
+usecase "状态迁移规则配置" as UC32
+usecase "系统参数配置" as UC33
+usecase "操作日志查询" as UC34
+
+actor "班主任\n（Web管理端）" as Teacher
+actor "系统管理员\n（Web管理端）" as Admin
+actor "配送站\n（Web面板）" as Delivery
+
+' ---- 强制三列网格布局（隐藏链接，不显示） ----
+UC1 -[hidden]down- UC2
+UC2 -[hidden]down- UC3
+UC3 -[hidden]down- UC4
+UC4 -[hidden]down- UC5
+UC5 -[hidden]down- UC6
+UC6 -[hidden]down- UC7
+UC7 -[hidden]down- UC8
+UC8 -[hidden]down- UC9
+UC9 -[hidden]down- UC10
+UC10 -[hidden]down- UC11
+UC11 -[hidden]down- UC12
+
+UC12 -[hidden]down- UC13
+UC13 -[hidden]down- UC14
+UC14 -[hidden]down- UC15
+UC15 -[hidden]down- UC16
+UC16 -[hidden]down- UC17
+UC17 -[hidden]down- UC18
+UC18 -[hidden]down- UC19
+UC19 -[hidden]down- UC20
+UC20 -[hidden]down- UC21
+UC21 -[hidden]down- UC22
+UC22 -[hidden]down- UC23
+
+UC23 -[hidden]down- UC24
+UC24 -[hidden]down- UC25
+UC25 -[hidden]down- UC26
+UC26 -[hidden]down- UC27
+UC27 -[hidden]down- UC28
+UC28 -[hidden]down- UC29
+UC29 -[hidden]down- UC30
+UC30 -[hidden]down- UC31
+UC31 -[hidden]down- UC32
+UC32 -[hidden]down- UC33
+UC33 -[hidden]down- UC34
+
+' ---- 家长 ----
+Parent --> UC3
+Parent --> UC4
+Parent --> UC14
+Parent --> UC15
+Parent --> UC16
+Parent --> UC17
+Parent --> UC18
+Parent --> UC27
+Parent --> UC29
+
+' ---- 班主任 ----
+Teacher --> UC1
+Teacher --> UC6
+Teacher --> UC7
+Teacher --> UC8
+Teacher --> UC9
+Teacher --> UC18
+Teacher --> UC22
+Teacher --> UC23
+Teacher --> UC24
+Teacher --> UC28
+
+' ---- 系统管理员 ----
+Admin --> UC1
+Admin --> UC2
+Admin --> UC5
+Admin --> UC6
+Admin --> UC7
+Admin --> UC8
+Admin --> UC9
+Admin --> UC10
+Admin --> UC11
+Admin --> UC12
+Admin --> UC13
+Admin --> UC15
+Admin --> UC18
+Admin --> UC19
+Admin --> UC20
+Admin --> UC21
+Admin --> UC22
+Admin --> UC25
+Admin --> UC26
+Admin --> UC28
+Admin --> UC31
+Admin --> UC32
+Admin --> UC33
+Admin --> UC34
+
+' ---- 配送站 ----
+Delivery --> UC1
+Delivery --> UC21
+Delivery --> UC22
+
+' ---- 微信服务器（系统参与者） ----
+WeChat --> UC3 : "jscode2session\n核验登录"
+WeChat --> UC16 : "支付回调通知\n（模拟）"
+
+@enduml

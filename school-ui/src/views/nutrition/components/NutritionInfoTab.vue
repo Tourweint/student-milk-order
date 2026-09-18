@@ -139,9 +139,14 @@ function openDialog(row?: any) {
 async function handleSave() {
   if (!formRef.value) return
   await formRef.value.validate()
+  const productId = form.productId
+  if (!productId) {
+    ElMessage.warning('请选择奶品')
+    return
+  }
   saving.value = true
   try {
-    await saveNutritionInfo({ ...form })
+    await saveNutritionInfo({ ...form, productId })
     ElMessage.success('保存成功')
     dialogVisible.value = false
     fetchList()

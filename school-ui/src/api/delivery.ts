@@ -74,3 +74,8 @@ export function batchSignDeliveryRecords(data: { deliveryDate: string; classId?:
 export function rejectDeliveryRecord(recordId: number, reason?: string) {
   return post('/delivery/record/reject', null, { params: { recordId, reason } })
 }
+
+/** 待签收汇总：某配送日期（默认今天）「已送出未签收」记录按班级聚合（班主任限本班） */
+export function getPendingSign(deliveryDate?: string) {
+  return get('/delivery/record/pending-sign', { deliveryDate })
+}

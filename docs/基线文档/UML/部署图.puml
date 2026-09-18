@@ -1,0 +1,68 @@
+@startuml 学生奶订购系统-部署图
+' 部署图：与 docs/基线文档/系统架构.md 部署架构一致
+skinparam defaultFontName "Microsoft YaHei"
+skinparam node {
+  FontSize 12
+  BorderColor #2F5496
+  BackgroundColor #EAF1FB
+}
+skinparam component {
+  FontSize 10
+  BorderColor #8EAADB
+  BackgroundColor #FFFFFF
+}
+skinparam arrowColor #555555
+skinparam artifact {
+  FontSize 10
+  BackgroundColor #FFF7E6
+  BorderColor #C9A063
+}
+left to right direction
+
+node "家长手机" as PHONE {
+  component "微信小程序\n(miniprogram)" as MP
+  artifact "pages/ api/ utils/" as MPFILE
+  MP - MPFILE
+}
+
+node "教师/管理员电脑" as PC {
+  component "浏览器" as BR
+}
+
+node "Web服务器\n(Nginx :80)" as NGINX {
+  artifact "school-ui/dist\n(静态资源)" as DIST
+}
+
+node "应用服务器\n(Spring Boot :8090)" as APP {
+  component "JWT过滤器" as JWT
+  component "Controller层" as CTRL
+  component "Service业务层" as SVC
+  component "Mapper持久层\n(MyBatis-Plus)" as MAPPER
+  component "定时任务\n(自动续订/超时取消/对账)" as JOB
+  component "微信支付模拟器" as PAYSIM
+  component "Excel导入导出\n(POI)" as POI
+  JWT --> CTRL
+  CTRL --> SVC
+  SVC --> MAPPER
+  SVC --> JOB
+  SVC --> PAYSIM
+  SVC --> POI
+}
+
+node "数据库服务器\n(MySQL :3306)" as DB {
+  database "student_milk_order" as SCHEMA
+}
+
+node "微信服务器" as WX {
+  component "jscode2session" as JS2S
+  component "支付回调接口\n(模拟)" as PAYCALL
+}
+
+PHONE --> APP : "HTTPS /api（本地联调直连8090）"
+BR --> NGINX : "HTTP :80"
+NGINX --> APP : "反向代理 /api"
+APP --> DB : "JDBC :3306"
+APP --> WX : "code换取openid / 支付预下单"
+WX --> APP : "支付结果回调 notify"
+
+@enduml

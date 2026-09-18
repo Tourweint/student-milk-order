@@ -11,6 +11,7 @@ import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.PendingSignVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -109,6 +110,12 @@ public class DeliveryController {
             @RequestParam(required = false) Integer signStatus) {
         IPage<DeliveryRecordVO> page = deliveryTaskService.pageRecords(pageNum, pageSize, deliveryDate, classId, studentId, signStatus);
         return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
+    }
+
+    /** 待签收汇总：某配送日期（默认今天）「已送出未签收」记录按班级聚合；班主任限本班，用于提醒与一键签收入口 */
+    @GetMapping("/record/pending-sign")
+    public ApiResponse<PendingSignVO> pendingSign(@RequestParam(required = false) String deliveryDate) {
+        return ApiResponse.success(deliveryTaskService.pendingSign(deliveryDate));
     }
 
     @PostMapping("/record/sign")

@@ -17,6 +17,14 @@
       <el-button type="success" :loading="dispatching" @click="handleDispatchAll">今日已送出</el-button>
     </div>
 
+    <!-- 未签收提醒：已送出但未签收的任务（配送站与老师线下接触多，可口头提醒） -->
+    <div v-if="pendingDispatchTotal > 0" class="pending-bar">
+      <el-icon class="pending-icon"><Bell /></el-icon>
+      <span class="pending-text">
+        今日已送出 <b>{{ pendingDispatchTotal }}</b> 条尚未签收，请提醒班主任及时签收；次日凌晨未签收将自动签收兜底。
+      </span>
+    </div>
+
     <!-- 按班级汇总概览 -->
     <el-table v-loading="summaryLoading" :data="summaryList" stripe class="summary-table">
       <el-table-column prop="className" label="班级" min-width="140">
@@ -140,7 +148,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -192,6 +200,11 @@ const lastDispatchInfo = ref('')
 
 const summaryLoading = ref(false)
 const summaryList = ref<DailySummary[]>([])
+
+/** 已送出（配送中）未签收任务总数，用于顶部提醒班主任 */
+const pendingDispatchTotal = computed(() =>
+  summaryList.value.reduce((sum, row) => sum + (row.dispatching || 0), 0)
+)
 
 const taskLoading = ref(false)
 const taskList = ref<DeliveryTaskRow[]>([])
@@ -344,6 +357,20 @@ onMounted(refresh)
   .tip { color: var(--el-text-color-secondary); font-size: 12px; }
 }
 .summary-table { margin-bottom: 8px; }
+.pending-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: #fdf3e3;
+  border: 1px solid #f0d9b0;
+  border-radius: 6px;
+  .pending-icon { color: #e6a23c; font-size: 18px; }
+  .pending-text { flex: 1; min-width: 200px; color: #7a5a20; font-size: 14px; }
+  b { color: #c77700; }
+}
 .station-tabs {
   margin-top: 8px;
   :deep(.el-tab-pane) { padding-top: 4px; }

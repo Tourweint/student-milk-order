@@ -1,5 +1,15 @@
 <template>
   <div class="record-tab">
+    <!-- 今日待签收提醒 + 一键签收（次日凌晨未签收将自动签收兜底） -->
+    <div v-if="pendingSign.total > 0" class="pending-bar">
+      <el-icon class="pending-icon"><Bell /></el-icon>
+      <span class="pending-text">
+        今日待签收 <b>{{ pendingSign.total }}</b> 条<span v-if="pendingSign.classes.length">（{{ classText }}）</span>，
+        请及时签收；次日凌晨未签收将自动签收兜底。
+      </span>
+      <el-button type="warning" size="small" :loading="batchSigning" @click="handleBatchSign(today())">一键签收今日</el-button>
+    </div>
+
     <!-- 筛选 -->
     <div class="toolbar">
       <el-date-picker v-model="queryDate" type="date" placeholder="配送日期" value-format="YYYY-MM-DD" class="filter-item" />
@@ -74,10 +84,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  getDeliveryRecordList, signDeliveryRecord, rejectDeliveryRecord, batchSignDeliveryRecords
+  getDeliveryRecordList, signDeliveryRecord, rejectDeliveryRecord, batchSignDeliveryRecords, getPendingSign
 } from '@/api/delivery'
 import { getAllClass } from '@/api/clazz'
 import { getStudentList } from '@/api/student'
@@ -88,13 +98,32 @@ const tableData = ref<any[]>([])
 const total = ref(0)
 const classList = ref<any[]>([])
 const studentList = ref<any[]>([])
-const queryDate = ref('')
+const queryDate = ref(today())
 const signVisible = ref(false)
 const signPerson = ref('')
 const signRemark = ref('')
 const signing = ref(false)
 const currentRecord = ref<any>(null)
 const batchSigning = ref(false)
+
+/** 今日待签收汇总（后端 /delivery/record/pending-sign，班主任限本班） */
+const pendingSign = reactive({ total: 0, classes: [] as any[] })
+const classText = computed(() =>
+  (pendingSign.classes as any[]).map((c) => `${c.className || '未知班级'}${c.count}条`).join('、')
+)
+
+function today(): string {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+async function fetchPendingSign() {
+  const res: any = await getPendingSign(today())
+  pendingSign.total = Number(res.data?.total ?? 0)
+  pendingSign.classes = res.data?.classes || []
+}
 
 const query = reactive({
   pageNum: 1, pageSize: 10,
@@ -178,9 +207,10 @@ async function confirmSign() {
   }
 }
 
-/** 按配送日期（可选班级）批量签收当日全部未签收记录 */
-async function handleBatchSign() {
-  if (!queryDate.value) {
+/** 按配送日期（可选班级）批量签收当日全部未签收记录；date 缺省用当前筛选日期（一键签收固定传 today） */
+async function handleBatchSign(date?: string) {
+  const targetDate = date || queryDate.value
+  if (!targetDate) {
     ElMessage.warning('请先选择配送日期')
     return
   }
@@ -188,7 +218,7 @@ async function handleBatchSign() {
   const scopeText = cls ? `班级「${classLabel(cls)}」` : '全部班级'
   try {
     await ElMessageBox.confirm(
-      `确定将 ${queryDate.value} ${scopeText} 的全部未签收记录批量签收吗？签收后将逐条生成营养摄入记录。`,
+      `确定将 ${targetDate} ${scopeText} 的全部未签收记录批量签收吗？签收后将逐条生成营养摄入记录。`,
       '批量签收确认',
       { confirmButtonText: '确定签收', cancelButtonText: '取消', type: 'warning' }
     )
@@ -197,7 +227,7 @@ async function handleBatchSign() {
   }
   batchSigning.value = true
   try {
-    const res: any = await batchSignDeliveryRecords({ deliveryDate: queryDate.value, classId: query.classId })
+    const res: any = await batchSignDeliveryRecords({ deliveryDate: targetDate, classId: query.classId })
     const count = Number(res?.data ?? 0)
     if (count > 0) {
       ElMessage.success(`已批量签收 ${count} 条记录`)
@@ -205,6 +235,7 @@ async function handleBatchSign() {
       ElMessage.info('该日期下没有可签收的未签收记录')
     }
     fetchList()
+    fetchPendingSign()
   } finally {
     batchSigning.value = false
   }
@@ -224,6 +255,7 @@ onMounted(() => {
   fetchClasses()
   fetchStudents()
   fetchList()
+  fetchPendingSign()
 })
 </script>
 
@@ -237,4 +269,18 @@ onMounted(() => {
   .filter-item { width: 150px; }
 }
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
+.pending-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  background: #fdf3e3;
+  border: 1px solid #f0d9b0;
+  border-radius: 6px;
+  .pending-icon { color: #e6a23c; font-size: 18px; }
+  .pending-text { flex: 1; min-width: 200px; color: #7a5a20; font-size: 14px; }
+  b { color: #c77700; }
+}
 </style>

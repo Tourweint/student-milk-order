@@ -1,5 +1,19 @@
 <template>
   <div class="dashboard">
+    <!-- 待签收提醒：管理员全局 / 班主任本班（点击直达配送管理一键签收） -->
+    <el-alert
+      v-if="stats.pendingSignCount > 0"
+      type="warning"
+      :closable="false"
+      class="pending-alert"
+      show-icon
+      @click="goPendingSign"
+    >
+      <template #title>
+        今日还有 <b>{{ stats.pendingSignCount }}</b> 条配送记录待签收，点击前往一键签收（次日凌晨将自动签收兜底）
+      </template>
+    </el-alert>
+
     <!-- 统计卡片 -->
     <el-row :gutter="20" class="stats-row">
       <el-col :span="6">
@@ -51,6 +65,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import StatsCard from '@/components/StatsCard.vue'
 import {
@@ -58,11 +73,14 @@ import {
   getClassRanking, getCoverage
 } from '@/api/stats'
 
+const router = useRouter()
+
 const stats = reactive({
   totalOrders: 0,
   activeStudents: 0,
   monthlySales: '¥0',
-  todayQuotaRemaining: 0
+  todayQuotaRemaining: 0,
+  pendingSignCount: 0
 })
 
 const trendChartRef = ref<HTMLElement>()
@@ -113,6 +131,12 @@ async function loadDashboard() {
   stats.activeStudents = d.activeStudents || 0
   stats.monthlySales = '¥' + Number(d.monthlySales || 0).toFixed(2)
   stats.todayQuotaRemaining = d.todayQuotaRemaining || 0
+  stats.pendingSignCount = d.pendingSignCount || 0
+}
+
+/** 点击待签收提醒 → 配送管理-配送记录页（默认今日，一键签收） */
+function goPendingSign() {
+  router.push({ path: '/delivery', query: { tab: 'record' } })
 }
 
 async function loadTrend() {
@@ -216,6 +240,11 @@ function initCharts() {
 
 .stats-row {
   margin-bottom: 20px;
+}
+
+.pending-alert {
+  margin-bottom: 20px;
+  cursor: pointer;
 }
 
 .chart-row {

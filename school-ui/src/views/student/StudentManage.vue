@@ -297,7 +297,8 @@ function onFileChange(file: UploadFile) {
 function onExceed(files: File[]) {
   uploadRef.value?.clearFiles()
   const file = files[0]
-  uploadRef.value?.handleStart(file)
+  // Element Plus 的 UploadRawFile 在 File 上扩展 uid，运行时由组件内部补全
+  uploadRef.value?.handleStart(file as any)
 }
 
 async function handleImport() {

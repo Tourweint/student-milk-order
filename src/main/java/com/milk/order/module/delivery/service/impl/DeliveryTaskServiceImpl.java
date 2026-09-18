@@ -24,6 +24,7 @@ import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.PendingSignVO;
 
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.system.service.StateMachineService;
@@ -681,6 +682,119 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         Page<DeliveryRecordVO> result = new Page<>(recordPage.getCurrent(), recordPage.getSize(), recordPage.getTotal());
         result.setRecords(voList);
         return result;
+    }
+
+    // ==================== 自动签收兜底 / 待签收汇总 ====================
+
+    /** 自动签收人标识（与人工签收区分，保留审计痕迹） */
+    private static final String AUTO_SIGN_PERSON = "系统自动签收";
+    /** 自动签收备注 */
+    private static final String AUTO_SIGN_REMARK = "超时未签收，系统自动签收";
+    /** 自动签收单批最大处理量（防止历史脏数据把定时任务拖死） */
+    private static final int MAX_AUTO_SIGN_BATCH = 200;
+
+    @Override
+    public List<Long> listExpiredAutoSignRecordIds(int limit) {
+        // 兜底窗口：配送日期早于 today 且任务已送出（配送中）——今天送出的留给老师当天签收，不自动兜底
+        List<DeliveryTask> tasks = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getStatus, 2)
+                .lt(DeliveryTask::getDeliveryDate, LocalDate.now())
+                .last("LIMIT " + Math.max(1, Math.min(limit, MAX_AUTO_SIGN_BATCH))));
+        if (tasks.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return deliveryRecordMapper.selectList(new LambdaQueryWrapper<DeliveryRecord>()
+                        .in(DeliveryRecord::getTaskId,
+                                tasks.stream().map(DeliveryTask::getId).collect(Collectors.toSet()))
+                        .eq(DeliveryRecord::getSignStatus, 2))
+                .stream().map(DeliveryRecord::getId).collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void autoSignOne(Long recordId) {
+        DeliveryRecord record = deliveryRecordMapper.selectById(recordId);
+        if (record == null || record.getSignStatus() == null || record.getSignStatus() != 2) {
+            return; // 已签收/已拒收/不存在：幂等跳过
+        }
+        DeliveryTask task = getById(record.getTaskId());
+        if (task == null || task.getStatus() == null || task.getStatus() != 2) {
+            return; // 任务未送出或已流转：跳过
+        }
+        if (task.getDeliveryDate() == null || !task.getDeliveryDate().isBefore(LocalDate.now())) {
+            return; // 未到兜底窗口（当天送出的留给老师签收）：跳过
+        }
+        // 复用人工签收共用流程：记录未签收→已签收（CAS）、任务配送中→已完成、生成营养摄入、订单全终态自动完成
+        doSign(record, AUTO_SIGN_PERSON, AUTO_SIGN_REMARK);
+    }
+
+    @Override
+    public PendingSignVO pendingSign(String deliveryDate) {
+        LocalDate date;
+        try {
+            date = StringUtils.hasText(deliveryDate) ? LocalDate.parse(deliveryDate) : LocalDate.now();
+        } catch (Exception e) {
+            throw new BusinessException("配送日期格式不正确");
+        }
+        // 数据权限：班主任仅能查看本班待签收（管理员/配送站不限）；家长角色无待签收管理视图，直接返回空
+        DataScope scope = dataScopeResolver.resolve();
+        Long classId = scope.getClassId();
+        if (scope.getStudentId() != null) {
+            PendingSignVO empty = new PendingSignVO();
+            empty.setTotal(0);
+            empty.setClasses(Collections.emptyList());
+            return empty;
+        }
+
+        List<DeliveryTask> tasks = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getDeliveryDate, date)
+                .eq(DeliveryTask::getStatus, 2)
+                .eq(classId != null, DeliveryTask::getClassId, classId));
+
+        PendingSignVO vo = new PendingSignVO();
+        if (tasks.isEmpty()) {
+            vo.setTotal(0);
+            vo.setClasses(Collections.emptyList());
+            return vo;
+        }
+        Map<Long, DeliveryTask> taskMap = tasks.stream()
+                .collect(Collectors.toMap(DeliveryTask::getId, Function.identity()));
+        List<DeliveryRecord> records = deliveryRecordMapper.selectList(
+                new LambdaQueryWrapper<DeliveryRecord>()
+                        .in(DeliveryRecord::getTaskId, taskMap.keySet())
+                        .eq(DeliveryRecord::getSignStatus, 2));
+        if (records.isEmpty()) {
+            vo.setTotal(0);
+            vo.setClasses(Collections.emptyList());
+            return vo;
+        }
+        // 按班级聚合待签收记录数
+        Map<Long, Long> byClass = records.stream()
+                .collect(Collectors.groupingBy(r -> {
+                    DeliveryTask t = taskMap.get(r.getTaskId());
+                    return t == null ? null : t.getClassId();
+                }, Collectors.counting()));
+        byClass.remove(null);
+
+        Set<Long> classIds = byClass.keySet();
+        Map<Long, ClassInfo> classMap = classIds.isEmpty() ? Collections.emptyMap()
+                : classInfoMapper.selectBatchIds(classIds).stream()
+                .collect(Collectors.toMap(ClassInfo::getId, Function.identity()));
+
+        List<PendingSignVO.ClassPending> classList = byClass.entrySet().stream()
+                .map(e -> {
+                    PendingSignVO.ClassPending cp = new PendingSignVO.ClassPending();
+                    cp.setClassId(e.getKey());
+                    ClassInfo c = classMap.get(e.getKey());
+                    cp.setClassName(c == null ? null : c.getClassName());
+                    cp.setCount(e.getValue().intValue());
+                    return cp;
+                })
+                .sorted(Comparator.comparing(PendingSignVO.ClassPending::getCount).reversed())
+                .collect(Collectors.toList());
+        vo.setTotal(records.size());
+        vo.setClasses(classList);
+        return vo;
     }
 
     // ==================== 内部工具 ====================

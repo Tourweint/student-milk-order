@@ -1,0 +1,276 @@
+@startuml 学生奶订购系统-类图
+' 类图：核心领域模型（与 src/main/java/com/milk/order/module/** 实体一一对应，字段为主要字段）
+skinparam defaultFontName "Microsoft YaHei"
+skinparam class {
+  FontSize 11
+  AttributeFontSize 10
+  BorderColor #4472C4
+  BackgroundColor #EAF1FB
+}
+skinparam package {
+  BackgroundColor #F7FAFF
+  BorderColor #8EAADB
+  FontSize 12
+}
+skinparam arrowColor #555555
+hide empty members
+
+package "用户与权限" {
+  class SysUser <<entity>> {
+    id : Long
+    username : String
+    realName : String
+    phone : String
+    status : Integer
+    studentId : Long
+    classId : Long
+    openid : String
+  }
+  class SysRole <<entity>> {
+    id : Long
+    roleCode : String
+    roleName : String
+    status : Integer
+  }
+  class SysUserRole <<entity>> {
+    userId : Long
+    roleId : Long
+  }
+}
+
+package "班级与学生" {
+  class Grade <<entity>> {
+    id : Long
+    gradeName : String
+    gradeCode : String
+    sort : Integer
+  }
+  class ClassInfo <<entity>> {
+    id : Long
+    className : String
+    gradeId : Long
+    teacherId : Long
+    studentCount : Integer
+  }
+  class Student <<entity>> {
+    id : Long
+    studentNo : String
+    studentName : String
+    gender : Integer
+    classId : Long
+    parentId : Long
+    parentName : String
+    parentPhone : String
+  }
+}
+
+package "奶品管理" {
+  class ProductCategory <<entity>> {
+    id : Long
+    categoryName : String
+    categoryCode : String
+    sort : Integer
+    status : Integer
+  }
+  class Product <<entity>> {
+    id : Long
+    productName : String
+    categoryId : Long
+    spec : String
+    flavor : String
+    price : BigDecimal
+    status : Integer
+    nutritionId : Long
+  }
+  class MealPackage <<entity>> {
+    id : Long
+    packageName : String
+    packageType : Integer
+    originalPrice : BigDecimal
+    discountPrice : BigDecimal
+    startDate : LocalDate
+    endDate : LocalDate
+    status : Integer
+  }
+  class MealPackageItem <<entity>> {
+    id : Long
+    packageId : Long
+    productId : Long
+    quantity : Integer
+  }
+  class DailyQuota <<entity>> {
+    id : Long
+    quotaDate : LocalDate
+    productId : Long
+    totalQuota : Integer
+    usedQuota : Integer
+  }
+  class DailyQuotaUsage <<entity>> {
+    id : Long
+    orderId : Long
+    productId : Long
+    quotaDate : LocalDate
+    boxes : Integer
+  }
+  class NutritionInfo <<entity>> {
+    id : Long
+    productId : Long
+    energy : BigDecimal
+    protein : BigDecimal
+    fat : BigDecimal
+    calcium : BigDecimal
+  }
+}
+
+package "订单与支付" {
+  class OrderInfo <<entity>> {
+    id : Long
+    orderNo : String
+    studentId : Long
+    userId : Long
+    classId : Long
+    packageId : Long
+    orderType : Integer
+    status : Integer
+    totalAmount : BigDecimal
+    payAmount : BigDecimal
+    deliveryStartDate : LocalDate
+    deliveryEndDate : LocalDate
+    payTime : LocalDateTime
+    transactionId : String
+  }
+  class OrderItem <<entity>> {
+    id : Long
+    orderId : Long
+    productId : Long
+    productName : String
+    spec : String
+    price : BigDecimal
+    quantity : Integer
+    subtotal : BigDecimal
+  }
+  class PaymentRecord <<entity>> {
+    id : Long
+    orderId : Long
+    orderNo : String
+    transactionId : String
+    amount : BigDecimal
+    payType : Integer
+    status : Integer
+    payTime : LocalDateTime
+    userId : Long
+  }
+}
+
+package "配送管理" {
+  class DeliveryTask <<entity>> {
+    id : Long
+    taskNo : String
+    deliveryDate : LocalDate
+    classId : Long
+    orderId : Long
+    studentId : Long
+    productId : Long
+    quantity : Integer
+    status : Integer
+    dispatchBy : String
+    dispatchTime : LocalDateTime
+  }
+  class DeliveryRecord <<entity>> {
+    id : Long
+    taskId : Long
+    studentId : Long
+    productId : Long
+    quantity : Integer
+    signStatus : Integer
+    signTime : LocalDateTime
+    signPerson : String
+  }
+  class NutritionIntake <<entity>> {
+    id : Long
+    studentId : Long
+    intakeDate : LocalDate
+    productId : Long
+    quantity : Integer
+    energy : BigDecimal
+    protein : BigDecimal
+    fat : BigDecimal
+    calcium : BigDecimal
+    deliveryRecordId : Long
+  }
+}
+
+package "自动续订" {
+  class SubscriptionPlan <<entity>> {
+    id : Long
+    studentId : Long
+    userId : Long
+    packageId : Long
+    originalOrderId : Long
+    cycleType : Integer
+    status : Integer
+    nextRenewalTime : LocalDateTime
+    lastRenewalTime : LocalDateTime
+    pauseTime : LocalDateTime
+    pauseReason : String
+  }
+}
+
+package "系统管理" {
+  class OperationLog <<entity>> {
+    id : Long
+    username : String
+    operation : String
+    requestUrl : String
+    ip : String
+    costTime : Long
+    status : Integer
+    errorMsg : String
+    createTime : LocalDateTime
+  }
+  class StateTransitionRule <<entity>> {
+    id : Long
+    scene : String
+    action : String
+    fromStatus : Integer
+    allowed : Integer
+    description : String
+  }
+  class SysConfig <<entity>> {
+    id : Long
+    configKey : String
+    configValue : String
+    description : String
+  }
+}
+
+' ---------- 关系 ----------
+SysUser "1" -- "0..*" SysUserRole
+SysRole "1" -- "0..*" SysUserRole
+SysUser "0..1" --> "0..*" Student : 家长绑定
+SysUser "0..1" <-- "1" ClassInfo : 班主任
+Grade "1" --> "0..*" ClassInfo
+ClassInfo "1" --> "0..*" Student
+ProductCategory "1" --> "0..*" Product
+Product "1" --> "0..1" NutritionInfo
+Product "1" --> "0..*" MealPackageItem
+MealPackage "1" --> "0..*" MealPackageItem
+Product "1" --> "0..*" DailyQuota
+Product "1" --> "0..*" DailyQuotaUsage
+OrderInfo "1" --> "0..*" OrderItem
+Product "1" <-- "0..*" OrderItem
+Student "1" <-- "0..*" OrderInfo
+MealPackage "0..1" <-- "0..*" OrderInfo
+OrderInfo "1" --> "0..*" PaymentRecord
+OrderInfo "1" --> "0..*" DeliveryTask
+Product "1" <-- "0..*" DeliveryTask
+Student "1" <-- "0..*" DeliveryTask
+DeliveryTask "1" --> "0..*" DeliveryRecord
+Product "1" <-- "0..*" DeliveryRecord
+Student "1" <-- "0..*" NutritionIntake
+Student "1" <-- "0..*" SubscriptionPlan
+MealPackage "1" <-- "0..*" SubscriptionPlan
+OrderInfo "1" <-- "0..*" SubscriptionPlan
+DailyQuotaUsage "0..*" --> "1" OrderInfo : 配额台账
+
+@enduml
