@@ -102,7 +102,8 @@ INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark
 -- ============================================================
 INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order.pay.timeout.minutes', '15', '待支付订单超时自动取消阈值（分钟）；超时后先查单对账兜底再取消'),
-('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账');
+('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账'),
+('order.process.reconcile.enabled', 'true', '过程聚合对账补偿任务开关：修复父订单状态与子任务集合不一致的漂移');
 
 -- ============================================================
 -- 状态迁移规则种子（默认规则 = 现行硬编码行为；管理端可在线调整）

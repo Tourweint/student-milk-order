@@ -47,11 +47,14 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 退订（待支付/已支付可退；已支付的退订回库） */
     void cancelOrder(Long id, String reason);
 
-    /** 任务开始配送联动：订单为已支付时置为配送中，其余状态不动作（退款闸门的统一出口） */
-    void markDeliveringIfPaid(Long orderId);
+    /** 任务开始配送联动：订单为已支付时置为配送中，其余状态不动作（退款闸门的统一出口）；返回是否发生迁移 */
+    boolean markDeliveringIfPaid(Long orderId);
 
-    /** 配送任务全部到达终态（已完成/已取消）时自动完成订单（仅配送中状态生效，其余不动作） */
-    void completeOrderIfAllTasksDone(Long orderId);
+    /** 过程聚合出口：配送任务全部到达终态（已完成/已取消）时自动完成订单（仅配送中状态生效）；返回是否发生迁移 */
+    boolean completeOrderIfAllTasksDone(Long orderId);
+
+    /** 过程聚合对账补偿（定时任务）：修复「父订单状态与子任务集合不一致」的漂移；返回修复数量 */
+    int reconcileOrderAggregation(int limit);
 
     /** 完成订单（配送中 → 已完成） */
     void completeOrder(Long id);

@@ -19,6 +19,13 @@ public final class StateTransitions {
     public static final String SCENE_DELIVERY_TASK = "DELIVERY_TASK";
     /** 续订计划状态机（subscription_plan.status） */
     public static final String SCENE_SUBSCRIPTION_PLAN = "SUBSCRIPTION_PLAN";
+    /**
+     * 配送记录子状态机（delivery_record.sign_status）
+     *
+     * <p>未纳入 state_transition_rule 规则表（属于任务状态机下挂的子状态），
+     * 只做 CAS 条件更新与迁移留痕，见 TransitionSpec.ruleGoverned=false。</p>
+     */
+    public static final String SCENE_DELIVERY_RECORD = "DELIVERY_RECORD";
 
     // ==================== 订单动作 ====================
 

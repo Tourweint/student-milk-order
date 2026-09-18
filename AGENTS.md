@@ -23,9 +23,12 @@
 
 - `README.md`：项目范围、启动方式和模块简介。
 - `docs/基线文档/系统架构.md`：架构、模块和订单状态流转。
+- `docs/基线文档/业务过程与可靠执行模型.md`：**核心抽象**——问题定义、四层模型、过程层与可靠性层的代码落点、不变量清单。
+- `docs/基线文档/可靠性设计.md`：幂等、CAS、行锁、台账、对账补偿的机制细节与判定口径。
 - `docs/基线文档/接口文档.md`：接口契约。
 - `docs/研发规范/项目开发规范.md`：详细的开发、命名与业务规则。
 - `docs/基线文档/部署手册.md`：环境和部署要求。
+- `docs/实验/`：验证层的实验设计与实测数据（改动可靠性机制后应重跑）。
 
 ## 仓库结构与边界
 
@@ -35,6 +38,8 @@ src/main/java/com/milk/order/
   config/       # Spring、MyBatis-Plus、Jackson、安全配置
   security/     # JWT 解析和认证过滤器
   exception/    # BusinessException 与全局异常处理
+  process/      # 过程层：状态迁移统一出口、迁移规格、迁移台账（横切，不依赖业务 Service）
+  reliability/  # 可靠性层：幂等守卫等跨模块可靠执行原语
   module/<name>/
     controller/ # REST 入口
     service/    # 业务接口与实现
@@ -43,6 +48,8 @@ src/main/java/com/milk/order/
 src/main/resources/
   application.yml
   sql/schema.sql, sql/data.sql
+src/test/java/com/milk/order/experiment/   # 并发/幂等/异常恢复实验
+src/test/resources/application-test.yml    # 实验专用配置（独立实验库、关闭定时任务）
 school-ui/src/
   api/          # 后端 API 调用封装
   components/   # 不依赖具体业务页面的可复用 UI
@@ -53,11 +60,14 @@ school-ui/src/
   views/        # 按业务模块组织的页面
 ```
 
-后端按业务模块组织，目前包括 `auth`、`user`、`clazz`、`product`、`order`、`delivery`、`nutrition`、`stats`、`subscription`。新模块须先确认它属于项目既定范围，不能仅因实现方便而创建。
+后端按业务模块组织，目前包括 `auth`、`user`、`clazz`、`product`、`order`、`delivery`、`nutrition`、`stats`、`subscription`、`system`。新模块须先确认它属于项目既定范围，不能仅因实现方便而创建。
+
+`process/` 与 `reliability/` 是**横切机制层**，不是业务模块，禁止在其中反向依赖任何业务 Service。
 
 ## 后端规则
 
 - 依赖方向必须保持为 `Controller -> Service -> Mapper -> MySQL`。Controller 只做请求/响应和参数绑定；业务规则、权限数据范围与跨表流程放在 Service；Mapper 只负责持久化访问。
+- 涉及状态迁移时，Service 通过过程层执行器完成，不要手写「规则判断 + 条件更新 + 抛异常」三件套：用户直接发起的操作用 `require`（失败抛业务异常），批量流转/定时兜底/对账补偿用 `attempt`（返回 false 即跳过，天然幂等）。
 - API 使用 `/api` 前缀、REST 风格 HTTP 方法，并返回 `ApiResponse<T>`（`code`、`message`、`data`）。分页沿用 `PageResult<T>` 与 `pageNum`/`pageSize` 参数，不另造响应格式。
 - 请求参数应使用 DTO 和 `@Valid`；业务失败抛 `BusinessException`，由 `GlobalExceptionHandler` 统一转换为用户可理解的响应。不要在 Controller 中吞异常或直接抛泛用 `RuntimeException`。
 - 涉及多表写入的新增、修改或删除，使用 `@Transactional` 保证原子性；事务中不要调用外部 HTTP/RPC 服务。
@@ -66,11 +76,26 @@ school-ui/src/
 
 ## 核心业务不变量
 
-实现或修改下列领域前，必须阅读研发规范中对应章节并检查现有实体、枚举、服务和接口：
+实现或修改下列领域前，必须阅读 `docs/基线文档/业务过程与可靠执行模型.md` 的「不变量清单」、
+`docs/基线文档/可靠性设计.md` 与研发规范中对应章节，并检查现有实体、枚举、服务和接口：
 
-- 订单状态只能经 `OrderInfoService` 按既定状态机单向流转；支付、退订、配送和完成不能在 Controller 或其他服务中直接改 `OrderInfo.status`。
-- 库存只能经 `InventoryService` 变更，并要保留 `inventory_record` 流水、检查库存不足与预警规则。
-- 模拟支付必须在同一事务中写入支付记录、更新订单状态和支付时间，并避免重复支付。
+- **状态迁移**：订单、配送任务、续订计划（以及配送记录子状态机）的 `status` 变更只能经
+  `ProcessTransitionExecutor`（`com.milk.order.process`）执行，且必须是以原状态为条件的 CAS 更新；
+  禁止读状态后无条件下全量更新。支付、退订、配送和完成不能在 Controller 中直接改状态。
+- **规则种子**：状态迁移是否允许由 `state_transition_rule` 白名单驱动；新增状态或动作必须同步补
+  `src/main/resources/sql/data.sql` 的规则种子，否则该迁移会被拒绝。
+- **父子状态**：父订单状态只能由子过程聚合决定（`markDeliveringIfPaid` / `completeOrderIfAllTasksDone`），
+  不得由某个子任务直接改写；漂移由 `reconcileOrderAggregation` 对账补偿。
+- **顺序**：同一动作同时涉及状态迁移与副作用（扣资源、写流水、展开任务）时，必须先 CAS 抢占状态，
+  落败方立即中止。顺序颠倒会产生重复副作用并互撞业务唯一键。
+- **资源变更**：只能经 `DailyQuotaService` —— 扣减必须「`selectForUpdate` 行锁读 + `used_quota + n <= total_quota`
+  条件更新 + 写 `daily_quota_usage` 台账」，回补必须按台账回到原池子。
+  （历史说明：`InventoryService` / `inventory_record` 已于 2026-09-12 随订购模式重构删除，不再存在。）
+- **幂等**：需要「同一业务键只存在一行」的记录必须建唯一约束，应用层用 `IdempotencyGuard` 把唯一键冲突
+  翻译为「已存在」；禁止用「先 `selectCount` 再 `insert`」实现幂等。
+- **支付**：模拟支付必须在同一事务内完成「状态抢占 + 配额扣减 + 支付流水 + 任务展开」，并保证重复回调只落账一次。
+- **隔离级别**：数据源统一 `READ_COMMITTED`；不要在写路径改回 `REPEATABLE READ`
+  （MariaDB 与 MySQL 在 RR 下对「快照建立后被并发修改的行」行为不一致）。
 - 营养摄入记录由配送签收生成，营养统计是聚合查询，不应手工篡改摄入记录。
 - 续订任务是定时任务；生产续订不可被随意手工触发。
 - 密码必须 BCrypt 存储；数据权限在 Service 层落实：家长仅看自己的孩子，班主任仅看本班，管理员可查看全部。
@@ -98,7 +123,7 @@ school-ui/src/
 ```powershell
 # 后端（仓库根目录）
 mvn clean compile
-mvn test
+mvn test                       # 含 4 组并发/幂等/异常恢复实验（需先准备实验库）
 mvn spring-boot:run
 
 # 前端
@@ -108,7 +133,11 @@ npm run build
 npm run dev
 ```
 
-修改数据库结构或初始数据前，先更新相关文档并审查 `src/main/resources/sql/schema.sql` 与 `data.sql`；数据库初始化与部署步骤见 `docs/基线文档/部署手册.md`。
+- `mvn test` 会连接**独立实验库** `student_milk_order_test` 并关闭全部定时任务；首次运行前需按
+  `docs/实验/实验环境与运行说明.md` 第 3 节准备实验库（结构与种子必须与开发库同步，否则实验会失败）。
+- 实验数据归档在 `target/experiment-reports/`；改动可靠性机制（幂等、CAS、行锁、台账、对账补偿）后应重跑并同步文档。
+- 修改数据库结构或初始数据前，先更新相关文档并审查 `src/main/resources/sql/schema.sql` 与 `data.sql`；
+  若新增表/唯一键，实验库必须同步重建（见上条）。数据库初始化与部署步骤见 `docs/基线文档/部署手册.md`。
 
 ## 完成标准
 

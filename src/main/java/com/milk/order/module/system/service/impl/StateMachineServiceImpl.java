@@ -10,9 +10,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import javax.annotation.PostConstruct;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -26,9 +28,23 @@ public class StateMachineServiceImpl extends ServiceImpl<StateTransitionRuleMapp
     /** 缓存有效期（毫秒） */
     private static final long CACHE_TTL_MS = 60_000L;
 
-    /** key = scene|action|fromStatus → 是否允许 */
-    private final Map<String, Boolean> cache = new ConcurrentHashMap<>();
+    /**
+     * key = scene|action|fromStatus → 是否允许。
+     *
+     * <p>整体替换（写时复制）而不是原地清空重填：若用 {@code clear()} + {@code putAll()}，
+     * 并发读取方会在“已清空、尚未填完”的窗口内读到空规则表，而本实现是白名单语义，
+     * 于是瞬时把所有迁移判为禁止（实验二暴露：同一笔支付回调并发到达时，多数请求被误判为
+     * “规则禁止”而非正常的 CAS 冲突）。volatile 引用保证读取方要么看到旧规则、要么看到新规则。</p>
+     */
+    private volatile Map<String, Boolean> cache = Map.of();
+
     private final AtomicLong lastLoadTime = new AtomicLong(0);
+
+    /** 启动即加载规则表，避免首批并发请求落在空缓存上（白名单语义下空表 = 全部禁止） */
+    @PostConstruct
+    public void init() {
+        refresh();
+    }
 
     @Override
     public boolean allowed(String scene, String action, Integer fromStatus) {
@@ -93,7 +109,7 @@ public class StateMachineServiceImpl extends ServiceImpl<StateTransitionRuleMapp
     }
 
     private synchronized void refresh() {
-        Map<String, Boolean> fresh = new ConcurrentHashMap<>();
+        Map<String, Boolean> fresh = new HashMap<>();
         for (StateTransitionRule rule : list()) {
             if (rule.getScene() == null || rule.getAction() == null || rule.getFromStatus() == null) {
                 continue;
@@ -101,8 +117,8 @@ public class StateMachineServiceImpl extends ServiceImpl<StateTransitionRuleMapp
             fresh.put(key(rule.getScene(), rule.getAction(), rule.getFromStatus()),
                     Integer.valueOf(1).equals(rule.getAllowed()));
         }
-        cache.clear();
-        cache.putAll(fresh);
+        // 先把新规则表构造完整，再一次性替换引用：读取方不可能看到“半张规则表”
+        cache = Collections.unmodifiableMap(fresh);
         lastLoadTime.set(System.currentTimeMillis());
     }
 }

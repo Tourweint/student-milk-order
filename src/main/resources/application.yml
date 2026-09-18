@@ -11,6 +11,16 @@ spring:
     url: jdbc:mysql://localhost:3306/student_milk_order?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: 123456
+    hikari:
+      # 统一事务隔离级别为 READ COMMITTED。
+      #
+      # 本系统的并发安全全部由「条件更新(CAS) / 行锁 / 业务唯一键」显式保证，不依赖
+      # REPEATABLE READ 的可重复读语义；而 MariaDB 在 REPEATABLE READ 下会对
+      # “本事务已建立一致性读快照、随后又被并发事务修改过的行”拒绝加锁读与更新
+      # （报 Record has changed since last read in table 'xxx'），MySQL 则静默改读最新版本。
+      # 该差异由实验一、实验二在并发扣减/并发支付回调下暴露；显式统一隔离级别后，
+      # 两种数据库上的行为一致且可预期，也消除了“读快照、写最新”的语义撕裂。
+      transaction-isolation: TRANSACTION_READ_COMMITTED
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai

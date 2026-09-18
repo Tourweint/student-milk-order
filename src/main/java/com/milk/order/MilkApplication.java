@@ -10,7 +10,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  */
 @SpringBootApplication
 @EnableScheduling
-@MapperScan("com.milk.order.module.**.mapper")
+@MapperScan({"com.milk.order.module.**.mapper", "com.milk.order.process.mapper"})
 public class MilkApplication {
 
     public static void main(String[] args) {

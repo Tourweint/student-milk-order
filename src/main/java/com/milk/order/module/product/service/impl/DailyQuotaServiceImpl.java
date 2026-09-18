@@ -17,6 +17,7 @@ import com.milk.order.module.product.vo.QuotaVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -32,6 +33,10 @@ import java.util.stream.Collectors;
  * 结转模型：每个品种每天管理员设置的盒数是当日"新鲜池"；当日未售完的自动结转次日继续卖（牛奶不扔），
  * 按保质期（SHELF_DAYS 天）滚动，窗口外的剩余自动作废（动态计算，无需定时任务）。
  * 扣减按品种独立进行、先卖最老的池子（最接近过期的先出），并写订单台账供退订精确回补。
+ *
+ * <p>并发语义（可靠性层）：扣减是“读剩余 → 写已售”的读-改-写，池子行一律经
+ * {@code selectForUpdate} 加行锁后再写回，并由 {@code used_quota + n <= total_quota}
+ * 条件更新兜底，保证不超卖；订单台账行由业务唯一键保证同一订单同一池子只扣一次。</p>
  */
 @Slf4j
 @Service
@@ -88,7 +93,8 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
             if (item.getTotalQuota() == null || item.getTotalQuota() < 0) {
                 throw new BusinessException("机动盒数不合法");
             }
-            DailyQuota existing = getByDateAndProduct(quotaDate, item.getProductId());
+            // 同样走行锁读取：本方法也是“读-改-写”，必须与并发扣减保持同一套并发语义
+            DailyQuota existing = baseMapper.selectForUpdate(quotaDate, item.getProductId());
             if (existing == null) {
                 DailyQuota quota = new DailyQuota();
                 quota.setQuotaDate(quotaDate);
@@ -161,8 +167,17 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
         return remaining;
     }
 
+    /**
+     * 扣减零散订购配额。
+     *
+     * <p>事务隔离级别显式使用 {@link Isolation#READ_COMMITTED}：本方法必须在同一事务内
+     * 「读某行最新已提交版本 → 写回该行」，而默认的 REPEATABLE READ 会让本事务先建立一个
+     * 一致性读快照；此后若该行已被并发事务修改，MariaDB 会直接以
+     * “Record has changed since last read” 拒绝加锁读/更新（MySQL 则静默改读最新版本）。
+     * 显式 READ COMMITTED 使两种数据库行为一致，也让“读最新版本再写回”的语义不含糊。</p>
+     */
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public void deduct(Long orderId, LocalDate deliveryDate, List<QuotaDeductItem> items) {
         if (CollectionUtils.isEmpty(items)) {
             return;
@@ -171,26 +186,26 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                 new LambdaQueryWrapper<DailyQuotaUsage>().eq(DailyQuotaUsage::getOrderId, orderId)).isEmpty()) {
             return; // 幂等：该订单已扣减过
         }
-        // 逐品种校验余量（全部充足才开始扣，避免部分扣减）
         Map<Long, Integer> need = new LinkedHashMap<>();
         for (QuotaDeductItem item : items) {
             need.merge(item.getProductId(), item.getBoxes(), Integer::sum);
         }
-        for (Map.Entry<Long, Integer> entry : need.entrySet()) {
-            int available = remaining(entry.getKey(), deliveryDate);
-            if (available < entry.getValue()) {
-                Product p = productMapper.selectById(entry.getKey());
-                String name = p == null ? "奶品" + entry.getKey() : p.getProductName();
-                throw new BusinessException("「" + name + "」" + deliveryDate + " 剩余库存 " + available
-                        + " 盒，不足本次订购的 " + entry.getValue() + " 盒，卖完即止");
-            }
-        }
-        // 先卖最老的池子（最接近保质期的先出）
-        for (Map.Entry<Long, Integer> entry : need.entrySet()) {
-            int remain = entry.getValue();
-            for (int k = SHELF_DAYS - 1; k >= 0 && remain > 0; k--) {
+
+        // 第一遍：一次性加行锁，把每个品种保质期窗口内的池子读进来（先过期先出），
+        // 既得到权威的可扣总量，也确定了随后的扣减计划。
+        //
+        // 关键点：不要把「快照读校验 + 加锁写回」混在同一个事务里。同一事务先对某行做普通
+        // 一致性读、再对该行做加锁读或更新，MariaDB 会直接以
+        // “Record has changed since last read in table 'daily_quota'” 失败
+        // （MySQL 则静默读到最新版本）——实验一在并发扣减下暴露了这一数据库行为差异。
+        Map<Long, List<QuotaPool>> plans = new LinkedHashMap<>();
+        Map<Long, Integer> available = new LinkedHashMap<>();
+        for (Long productId : need.keySet()) {
+            List<QuotaPool> pools = new ArrayList<>();
+            int total = 0;
+            for (int k = SHELF_DAYS - 1; k >= 0; k--) {
                 LocalDate poolDate = deliveryDate.minusDays(k);
-                DailyQuota quota = getByDateAndProduct(poolDate, entry.getKey());
+                DailyQuota quota = baseMapper.selectForUpdate(poolDate, productId);
                 if (quota == null) {
                     continue;
                 }
@@ -198,9 +213,34 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                 if (poolRemaining <= 0) {
                     continue;
                 }
-                int take = Math.min(poolRemaining, remain);
+                pools.add(new QuotaPool(quota.getId(), poolDate, poolRemaining));
+                total += poolRemaining;
+            }
+            plans.put(productId, pools);
+            available.put(productId, total);
+        }
+
+        // 第二遍：全部品种都充足才继续；任一不足即整体抛出，事务回滚，不会留下部分扣减
+        for (Map.Entry<Long, Integer> entry : need.entrySet()) {
+            int remaining = available.getOrDefault(entry.getKey(), 0);
+            if (remaining < entry.getValue()) {
+                Product p = productMapper.selectById(entry.getKey());
+                String name = p == null ? "奶品" + entry.getKey() : p.getProductName();
+                throw new BusinessException("「" + name + "」" + deliveryDate + " 剩余库存 " + remaining
+                        + " 盒，不足本次订购的 " + entry.getValue() + " 盒，卖完即止");
+            }
+        }
+
+        // 第三遍：按计划写回（池子已在本事务行锁内，条件更新作为最后一道防御）
+        for (Map.Entry<Long, Integer> entry : need.entrySet()) {
+            int remain = entry.getValue();
+            for (QuotaPool pool : plans.getOrDefault(entry.getKey(), Collections.emptyList())) {
+                if (remain <= 0) {
+                    break;
+                }
+                int take = Math.min(pool.remaining(), remain);
                 LambdaUpdateWrapper<DailyQuota> update = new LambdaUpdateWrapper<>();
-                update.eq(DailyQuota::getId, quota.getId())
+                update.eq(DailyQuota::getId, pool.id())
                         .apply("used_quota + {0} <= total_quota", take)
                         .setSql("used_quota = used_quota + " + take);
                 if (!update(update)) {
@@ -210,13 +250,17 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                     DailyQuotaUsage usage = new DailyQuotaUsage();
                     usage.setOrderId(orderId);
                     usage.setProductId(entry.getKey());
-                    usage.setQuotaDate(poolDate);
+                    usage.setQuotaDate(pool.poolDate());
                     usage.setBoxes(take);
                     dailyQuotaUsageMapper.insert(usage);
                 }
                 remain -= take;
             }
         }
+    }
+
+    /** 保质期窗口内一个已加行锁的配额池：池子ID、池子日期、可扣剩余量 */
+    private record QuotaPool(Long id, LocalDate poolDate, int remaining) {
     }
 
     @Override

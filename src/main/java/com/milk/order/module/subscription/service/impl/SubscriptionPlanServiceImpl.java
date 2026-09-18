@@ -21,9 +21,10 @@ import com.milk.order.module.subscription.entity.SubscriptionPlan;
 import com.milk.order.module.subscription.mapper.SubscriptionPlanMapper;
 import com.milk.order.module.subscription.service.SubscriptionPlanService;
 import com.milk.order.module.subscription.vo.SubscriptionPlanVO;
-import com.milk.order.module.system.service.StateMachineService;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.service.DataScopeResolver;
+import com.milk.order.process.ProcessTransitionExecutor;
+import com.milk.order.process.TransitionSpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,7 +54,7 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     private final OrderInfoService orderInfoService;
     private final DeliveryTaskService deliveryTaskService;
     private final DataScopeResolver dataScopeResolver;
-    private final StateMachineService stateMachineService;
+    private final ProcessTransitionExecutor processTransitionExecutor;
 
     /**
      * 自代理：processDuePlans 循环内若直接 this.triggerRenewal(...)，同类内部调用不经过代理，
@@ -202,21 +203,27 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     public void pausePlan(Long id, String reason, boolean keepPendingTasks) {
         SubscriptionPlan plan = getPlan(id);
         checkPlanAccess(plan);
-        // 状态机规则：已开启→已暂停（管理端可配置是否允许）
-        stateMachineService.assertAllowed(StateTransitions.SCENE_SUBSCRIPTION_PLAN,
-                StateTransitions.ACTION_PAUSE, plan.getStatus(), "续订计划");
-        // CAS 条件更新：并发暂停/关闭/触发续订时仅一方成功
-        boolean paused = lambdaUpdate()
-                .eq(SubscriptionPlan::getId, id)
-                .eq(SubscriptionPlan::getStatus, STATUS_ACTIVE)
-                .set(SubscriptionPlan::getStatus, STATUS_PAUSED)
-                .set(SubscriptionPlan::getPauseTime, LocalDateTime.now())
-                .set(SubscriptionPlan::getPauseReason,
-                        reason == null || reason.isEmpty() ? "家长/管理端暂停" : reason)
-                .update();
-        if (!paused) {
-            throw new BusinessException("计划状态已变更，请刷新后重试");
-        }
+        String pauseReason = reason == null || reason.isEmpty() ? "家长/管理端暂停" : reason;
+        // 过程层严格迁移：规则校验（已开启→已暂停，管理端可配置）+ CAS（并发暂停/关闭/续订仅一方成功）+ 留痕
+        processTransitionExecutor.require(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_SUBSCRIPTION_PLAN)
+                        .action(StateTransitions.ACTION_PAUSE)
+                        .sceneText("续订计划")
+                        .entityType("subscription_plan")
+                        .entityId(id)
+                        .fromStatus(plan.getStatus())
+                        .toStatus(STATUS_PAUSED)
+                        .conflictMessage("计划状态已变更，请刷新后重试")
+                        .remark(pauseReason)
+                        .build(),
+                () -> lambdaUpdate()
+                        .eq(SubscriptionPlan::getId, id)
+                        .eq(SubscriptionPlan::getStatus, STATUS_ACTIVE)
+                        .set(SubscriptionPlan::getStatus, STATUS_PAUSED)
+                        .set(SubscriptionPlan::getPauseTime, LocalDateTime.now())
+                        .set(SubscriptionPlan::getPauseReason, pauseReason)
+                        .update());
         // 已生成配送任务（已支付权益）默认保留照常配送；可选取消未配送任务
         if (!keepPendingTasks) {
             int cancelled = deliveryTaskService.cancelPendingTasksForOrder(plan.getOriginalOrderId());
@@ -231,9 +238,6 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     public void resumePlan(Long id) {
         SubscriptionPlan plan = getPlan(id);
         checkPlanAccess(plan);
-        // 状态机规则：已暂停→已开启
-        stateMachineService.assertAllowed(StateTransitions.SCENE_SUBSCRIPTION_PLAN,
-                StateTransitions.ACTION_RESUME, plan.getStatus(), "续订计划");
         LocalDateTime nextRenewal = plan.getNextRenewalTime();
         // 恢复时下次续订时间顺延：从当前时刻起算（至少推到明晚 2 点），
         // 避免暂停跨越续订点后恢复瞬间立刻触发扣款
@@ -241,18 +245,29 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
         if (nextRenewal == null || nextRenewal.isBefore(safeNext)) {
             nextRenewal = safeNext;
         }
-        boolean resumed = lambdaUpdate()
-                .eq(SubscriptionPlan::getId, id)
-                .eq(SubscriptionPlan::getStatus, STATUS_PAUSED)
-                .set(SubscriptionPlan::getStatus, STATUS_ACTIVE)
-                .set(SubscriptionPlan::getNextRenewalTime, nextRenewal)
-                .set(SubscriptionPlan::getPauseTime, null)
-                .set(SubscriptionPlan::getPauseReason, null)
-                .update();
-        if (!resumed) {
-            throw new BusinessException("计划状态已变更，请刷新后重试");
-        }
-        log.info("【自动续订】计划{} 已恢复，下次续订时间 {}", id, nextRenewal);
+        // 过程层严格迁移：规则校验（已暂停→已开启）+ CAS 条件更新 + 留痕
+        LocalDateTime resumedNext = nextRenewal;
+        processTransitionExecutor.require(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_SUBSCRIPTION_PLAN)
+                        .action(StateTransitions.ACTION_RESUME)
+                        .sceneText("续订计划")
+                        .entityType("subscription_plan")
+                        .entityId(id)
+                        .fromStatus(plan.getStatus())
+                        .toStatus(STATUS_ACTIVE)
+                        .conflictMessage("计划状态已变更，请刷新后重试")
+                        .remark("恢复续订，下次续订时间顺延至 " + resumedNext)
+                        .build(),
+                () -> lambdaUpdate()
+                        .eq(SubscriptionPlan::getId, id)
+                        .eq(SubscriptionPlan::getStatus, STATUS_PAUSED)
+                        .set(SubscriptionPlan::getStatus, STATUS_ACTIVE)
+                        .set(SubscriptionPlan::getNextRenewalTime, resumedNext)
+                        .set(SubscriptionPlan::getPauseTime, null)
+                        .set(SubscriptionPlan::getPauseReason, null)
+                        .update());
+        log.info("【自动续订】计划{} 已恢复，下次续订时间 {}", id, resumedNext);
     }
 
     @Override
@@ -260,18 +275,26 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
     public void closePlan(Long id, boolean terminateNow, String reason) {
         SubscriptionPlan plan = getPlan(id);
         checkPlanAccess(plan);
-        // 状态机规则：已开启/已暂停→已关闭
-        stateMachineService.assertAllowed(StateTransitions.SCENE_SUBSCRIPTION_PLAN,
-                StateTransitions.ACTION_CLOSE, plan.getStatus(), "续订计划");
-        boolean closed = lambdaUpdate()
-                .eq(SubscriptionPlan::getId, id)
-                .in(SubscriptionPlan::getStatus, STATUS_ACTIVE, STATUS_PAUSED)
-                .set(SubscriptionPlan::getStatus, STATUS_CLOSED)
-                .set(SubscriptionPlan::getRemark, buildCloseRemark(plan, reason, terminateNow))
-                .update();
-        if (!closed) {
-            throw new BusinessException("计划状态已变更，请刷新后重试");
-        }
+        // 过程层严格迁移：规则校验（已开启/已暂停→已关闭）+ CAS 条件更新 + 留痕
+        String closeRemark = buildCloseRemark(plan, reason, terminateNow);
+        processTransitionExecutor.require(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_SUBSCRIPTION_PLAN)
+                        .action(StateTransitions.ACTION_CLOSE)
+                        .sceneText("续订计划")
+                        .entityType("subscription_plan")
+                        .entityId(id)
+                        .fromStatus(plan.getStatus())
+                        .toStatus(STATUS_CLOSED)
+                        .conflictMessage("计划状态已变更，请刷新后重试")
+                        .remark(closeRemark)
+                        .build(),
+                () -> lambdaUpdate()
+                        .eq(SubscriptionPlan::getId, id)
+                        .eq(SubscriptionPlan::getStatus, plan.getStatus())
+                        .set(SubscriptionPlan::getStatus, STATUS_CLOSED)
+                        .set(SubscriptionPlan::getRemark, closeRemark)
+                        .update());
         // 终止时机：默认送完当前已生成的配送周期（未配送任务保留，已支付权益不损失）；
         // terminateNow=true 时同时取消未配送任务（立即终止，剩余期次线下退款）
         if (terminateNow) {
@@ -301,7 +324,7 @@ public class SubscriptionPlanServiceImpl extends ServiceImpl<SubscriptionPlanMap
         SubscriptionPlan plan = getPlan(id);
         checkPlanAccess(plan);
         // 状态机规则：仅已开启状态可续订（已暂停/已关闭的计划不会被定时任务或手动触发续订）
-        stateMachineService.assertAllowed(StateTransitions.SCENE_SUBSCRIPTION_PLAN,
+        processTransitionExecutor.requireAllowed(StateTransitions.SCENE_SUBSCRIPTION_PLAN,
                 StateTransitions.ACTION_RENEW, plan.getStatus(), "续订计划");
         // 调用订单服务续订（复制原订单+自动支付）
         Long newOrderId = orderInfoService.renewOrder(plan.getOriginalOrderId());

@@ -204,6 +204,7 @@ CREATE TABLE IF NOT EXISTS daily_quota_usage (
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_order_product_pool (order_id, product_id, quota_date),
     KEY idx_order_id (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='每日机动配额扣减台账';
 
@@ -302,6 +303,7 @@ CREATE TABLE IF NOT EXISTS delivery_task (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     UNIQUE KEY uk_task_no (task_no),
+    UNIQUE KEY uk_order_product_date (order_id, product_id, delivery_date),
     KEY idx_delivery_date (delivery_date),
     KEY idx_class_id (class_id),
     KEY idx_status (status)
@@ -423,6 +425,26 @@ CREATE TABLE IF NOT EXISTS state_transition_rule (
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     UNIQUE KEY uk_scene_action_from (scene, action, from_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='状态迁移规则表（管理端可配置）';
+
+-- 业务过程迁移台账（过程层可观测基础）：每次状态迁移落一行，成功与 CAS 冲突都记录；
+-- 支撑“过程回放 / 问题回溯 / 父子状态聚合对账 / 实验取证”
+CREATE TABLE IF NOT EXISTS process_transition_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '台账ID',
+    scene VARCHAR(30) NOT NULL COMMENT '状态机场景：ORDER/DELIVERY_TASK/SUBSCRIPTION_PLAN/DELIVERY_RECORD',
+    action VARCHAR(30) NOT NULL COMMENT '动作编码：PAY/CANCEL/DELIVER/COMPLETE/DISPATCH/SIGN/REJECT/RENEW...',
+    entity_type VARCHAR(50) COMMENT '迁移主体表名，如 order_info',
+    entity_id BIGINT COMMENT '迁移主体主键',
+    biz_no VARCHAR(64) COMMENT '业务单号（订单号/任务号）',
+    from_status INT COMMENT '迁移前状态',
+    to_status INT COMMENT '迁移后状态',
+    result TINYINT NOT NULL COMMENT '迁移结果：1-已生效，0-CAS 冲突未生效',
+    operator_name VARCHAR(50) COMMENT '操作人；定时任务/对账补偿记为 system',
+    remark VARCHAR(255) COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '记录时间',
+    KEY idx_scene_action (scene, action),
+    KEY idx_entity (entity_type, entity_id),
+    KEY idx_create_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='业务过程迁移台账';
 
 -- 操作日志表
 CREATE TABLE IF NOT EXISTS operation_log (
