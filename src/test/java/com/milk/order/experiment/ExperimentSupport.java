@@ -4,10 +4,13 @@ import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.system.service.StateMachineService;
+import com.milk.order.common.constant.StateTransitions;
 import com.milk.order.process.invariant.ProcessInvariantScanner;
+import com.milk.order.process.job.ProcessPendingTaskJob;
 import com.milk.order.process.pending.ProcessPendingTask;
 import com.milk.order.process.pending.ProcessPendingTaskService;
 import com.milk.order.process.reconcile.ProcessReconcileCoordinator;
+import com.milk.order.process.reconcile.ReconcileOutcome;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,7 +60,7 @@ public abstract class ExperimentSupport {
             "nutrition_intake", "delivery_record", "delivery_task",
             "daily_quota_usage", "daily_quota", "payment_record",
             "order_item", "order_info", "process_transition_log",
-            "process_pending_task", "process_invariant_violation",
+            "process_pending_task", "process_invariant_violation", "wechat_pay_order",
             "student", "class_info", "product", "product_category", "grade");
 
     @Autowired
@@ -225,6 +228,80 @@ public abstract class ExperimentSupport {
                             ? null : rs.getTimestamp("next_retry_time").toLocalDateTime());
                     return task;
                 }, id);
+    }
+
+    /**
+     * 消费一批实时自愈待办（等价于 {@code ProcessPendingTaskJob} 的循环体：
+     * 领取 → 按最新状态补偿 → 置已处理；失败则退避重试）。
+     *
+     * @return 本轮真正补偿生效的条数
+     */
+    protected int drainPendingTasks(int limit) {
+        int repaired = 0;
+        for (ProcessPendingTask task : pendingTaskService.claimDue(limit)) {
+            try {
+                ReconcileOutcome outcome = reconcileCoordinator.reconcileEntity(task.getScene(), task.getEntityId());
+                if (outcome.isRepaired()) {
+                    repaired++;
+                }
+                pendingTaskService.markDone(task.getId());
+            } catch (Exception e) {
+                pendingTaskService.markRetry(task, e.getMessage(), ProcessPendingTaskJob.MAX_RETRY);
+            }
+        }
+        return repaired;
+    }
+
+    /**
+     * 让两条自愈通道各跑一轮：兜底通道（批量补偿）+ 实时通道（消费待办）。
+     *
+     * @return 两条通道合计补偿生效条数
+     */
+    protected int runOneRoundOfBothChannels(int limit) {
+        int repaired = 0;
+        for (ReconcileOutcome outcome : reconcileCoordinator.reconcile(StateTransitions.SCENE_ORDER, limit)) {
+            if (outcome.isRepaired()) {
+                repaired++;
+            }
+        }
+        return repaired + drainPendingTasks(limit);
+    }
+
+    /** 反复跑两条通道直到不再有补偿生效（或在最大轮次后停止），返回总补偿条数与实际轮次 */
+    protected int convergeBothChannels(int limit, int maxRounds, int[] roundsOut) {
+        int total = 0;
+        int rounds = 0;
+        for (int i = 0; i < maxRounds; i++) {
+            rounds = i + 1;
+            int repaired = runOneRoundOfBothChannels(limit);
+            total += repaired;
+            if (repaired == 0) {
+                break;
+            }
+        }
+        if (roundsOut != null && roundsOut.length > 0) {
+            roundsOut[0] = rounds;
+        }
+        return total;
+    }
+
+    /**
+     * 启动一个带启动栅栏的守护线程：用于"跑满一段时间"的持续负载（长稳与压测实验共用）。
+     * 线程内异常只打印、不中断实验——最终一致性由断言体现，而不是靠线程崩溃暴露。
+     */
+    protected Thread daemonThread(String name, CountDownLatch startGate, Runnable body) {
+        Thread thread = new Thread(() -> {
+            try {
+                startGate.await();
+                body.run();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                System.err.println("[" + Thread.currentThread().getName() + "] " + e);
+            }
+        }, name);
+        thread.setDaemon(true);
+        return thread;
     }
 
     protected long id(String sql, Object... args) {

@@ -58,7 +58,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -90,15 +89,23 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     @Autowired
     private OrderInfoService orderInfoService;
 
-    private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final DateTimeFormatter NO_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final Pattern ML_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*ml", Pattern.CASE_INSENSITIVE);
 
-    /** 任务号单调序列：整期任务在同一事务的同一秒内批量生成，纯随机后缀必撞 uk_task_no 唯一键 */
-    private static final AtomicLong TASK_SEQ = new AtomicLong(System.currentTimeMillis() % 1000000);
-
-    private String nextTaskNo() {
-        return "DT" + LocalDateTime.now().format(NO_FMT)
-                + String.format("%06d", TASK_SEQ.incrementAndGet() % 1000000);
+    /**
+     * 任务号：由**业务键**确定性推导（订单 × 品种 × 配送日），而不是「时间戳 + JVM 内自增序列」。
+     *
+     * <p>原实现用 static 计数器生成任务号，多实例下两个实例的计数器互不知情，同一秒内可能生成同一个号。
+     * 更严重的是：任务表上同时有业务唯一键 `uk_order_product_date` 和任务号唯一键 `uk_task_no`，
+     * 而幂等守卫无法区分"业务键已存在（该跳过）"与"任务号撞了（该换号重试）"，
+     * 会把后者误判成前者并**静默跳过**——结果是**一条配送任务凭空消失**。</p>
+     *
+     * <p>改为确定性生成后：任务号冲突 ⟺ 业务键冲突，两者不可能再背离；
+     * 同时消除了唯一的跨实例本地状态（静态计数器）。任务号本身也变成了可读的
+     * （日期 + 订单 + 品种），排查时不用反查数据库。</p>
+     */
+    private String buildTaskNo(Long orderId, Long productId, LocalDate deliveryDate) {
+        return "DT" + deliveryDate.format(NO_DATE_FMT) + "-" + orderId + "-" + productId;
     }
 
     // ==================== 生成配送任务 ====================
@@ -182,10 +189,13 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
      * <p>幂等由数据库唯一键 uk_order_product_date 仲裁：并发场景（重复支付回调、手工补生成与
      * 自动展开撞车）下只有一方插入成功，另一方得到唯一键冲突并幂等跳过，任务数量恒等于理论数量。
      * 原先的“先 selectCount 再 insert”在并发下会双双查不到、再双双插入，是实验三暴露的缺陷。</p>
+     *
+     * <p>任务号由业务键确定性生成（见 {@link #buildTaskNo}），因此 uk_task_no 与 uk_order_product_date
+     * 不可能出现"一个冲突、另一个不冲突"的情形——「冲突即跳过」这个判定在多实例下依然成立。</p>
      */
     private int createTaskIfAbsent(OrderInfo order, Long productId, int quantity, LocalDate date) {
         DeliveryTask task = new DeliveryTask();
-        task.setTaskNo(nextTaskNo());
+        task.setTaskNo(buildTaskNo(order.getId(), productId, date));
         task.setDeliveryDate(date);
         task.setClassId(order.getClassId());
         task.setOrderId(order.getId());

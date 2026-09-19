@@ -34,6 +34,9 @@ public class InvariantScanResult {
     /** 修复未生效/异常条数 */
     private final int unrepaired;
 
+    /** 按实际情况降级为「仅告警」的条数（等级由不变量 × 具体情况共同决定） */
+    private final int alerts;
+
     /** 复检闭环条数（上轮未闭环、本轮未再检出） */
     private final int closed;
 
@@ -45,7 +48,7 @@ public class InvariantScanResult {
         if (error != null) {
             return String.format("%s（%s）探测异常：%s", code, severity.getText(), error);
         }
-        return String.format("%s（%s）检出 %d，新开 %d，重复漂移 %d，修复 %d，未修复 %d，复检闭环 %d",
-                code, severity.getText(), detected, opened, reopened, repaired, unrepaired, closed);
+        return String.format("%s（%s）检出 %d，新开 %d，重复漂移 %d，修复 %d，待人工 %d，未修复 %d，复检闭环 %d",
+                code, severity.getText(), detected, opened, reopened, repaired, alerts, unrepaired, closed);
     }
 }

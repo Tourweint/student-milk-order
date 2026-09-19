@@ -280,6 +280,28 @@ CREATE TABLE IF NOT EXISTS payment_record (
     KEY idx_transaction_id (transaction_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付记录表';
 
+-- 模拟微信侧支付单（扮演「微信支付平台」这一外部角色的持久化存储）
+-- 设计说明：模拟器原先把预支付单与已扣款单放在内存里，重启即失效，且是**多实例部署下唯一的本地状态**——
+-- 用户在实例 A 预下单、确认扣款时请求落到实例 B，就会"预支付单不存在"；
+-- 更糟的是实例 B 的对账任务查不到扣款记录，可能把已付款订单当作超时订单取消。
+-- 改为持久化后：状态由数据库共享，任意实例都能确认扣款与查单，重启不丢。
+CREATE TABLE IF NOT EXISTS wechat_pay_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '模拟微信侧支付单ID',
+    prepay_id VARCHAR(64) NOT NULL COMMENT '预支付凭证（模拟微信签发）',
+    out_trade_no VARCHAR(64) NOT NULL COMMENT '商户订单号',
+    order_id BIGINT COMMENT '商户订单ID（便于排查）',
+    amount DECIMAL(10,2) NOT NULL COMMENT '金额（元）',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '1-已签发预支付（待用户确认扣款），2-已扣款，3-已作废（被新的预支付替换）',
+    transaction_id VARCHAR(64) COMMENT '模拟微信支付流水号（扣款后生成）',
+    pay_time DATETIME COMMENT '扣款时间',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_prepay_id (prepay_id),
+    KEY idx_out_trade_no (out_trade_no),
+    KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模拟微信侧支付单（持久化，替代内存态以支持多实例）';
+
 -- ============================================================
 -- 5. 配送模块
 -- ============================================================
@@ -500,10 +522,12 @@ CREATE TABLE IF NOT EXISTS process_pending_task (
     trigger_action VARCHAR(30) NOT NULL COMMENT '触发动作（子过程终态动作），用于去重',
     status TINYINT NOT NULL DEFAULT 0 COMMENT '0-待处理，1-已处理，2-已放弃（超重试上限，转兜底通道）',
     retry_count INT NOT NULL DEFAULT 0 COMMENT '已重试次数',
-    next_retry_time DATETIME COMMENT '下次可处理时间（指数退避）',
+    next_retry_time DATETIME(3) COMMENT '下次可处理时间（指数退避）',
     last_error VARCHAR(255) COMMENT '最近一次失败原因',
-    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    -- 毫秒精度：实时通道的「入队 → 处理完成」耗时要能度量到毫秒，
+    -- 秒精度下所有样本只会落在 0ms / 1000ms 两档，度量失去意义（时间列精度也是可观测性的一部分）
+    create_time DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    update_time DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     UNIQUE KEY uk_pending (scene, entity_id, trigger_action, status),
     KEY idx_status_next (status, next_retry_time)

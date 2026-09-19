@@ -118,6 +118,10 @@ INSERT INTO process_reconcile_rule
  '订单仍为已支付但已有子任务开始配送 → 补偿推进为配送中（原硬编码场景一）'),
 ('聚合丢失补偿', 'ORDER', 3, 'ALL_TASKS_TERMINAL', 'AUTO_COMPLETE', 4, 1,
  '订单仍为配送中但子任务已全部到达终态 → 补偿聚合为已完成（原硬编码场景二）'),
+('已支付全终态补偿', 'ORDER', 2, 'ALL_TASKS_TERMINAL', 'AUTO_COMPLETE', 4, 1,
+ '订单仍为已支付但子任务已全部到达终态 → 补偿聚合为已完成（3.4 补齐实验十一发现的覆盖盲区；'
+ '依赖闸门 ORDER/AUTO_COMPLETE/2 放开。注意：子任务全部取消时也会补为已完成，'
+ '「全部取消→已退订」的区分见默认停用的全取消补偿规则与退款设计）'),
 ('全取消补偿', 'ORDER', 3, 'ALL_TASKS_CANCELLED', 'CANCEL', 5, 0,
  '订单配送中但子任务已全部取消 → 补偿为已退订。启用前需同步放开 state_transition_rule 中 ORDER/CANCEL/3，'
  '否则统一出口会以“规则禁止”拒绝该补偿（配置化规则之间的依赖）');
@@ -145,7 +149,7 @@ INSERT INTO state_transition_rule (scene, action, from_status, allowed, descript
 ('ORDER', 'DELIVER', 4, 0, '已完成订单禁止回退'),
 ('ORDER', 'DELIVER', 5, 0, '已取消订单禁止回退'),
 ('ORDER', 'AUTO_COMPLETE', 3, 1, '配送中订单在任务全部终态后自动完成'),
-('ORDER', 'AUTO_COMPLETE', 2, 0, '已支付订单未开始配送不自动完成'),
+('ORDER', 'AUTO_COMPLETE', 2, 1, '已支付订单在子任务全部终态后允许自动完成（3.4 补齐：聚合出口只在全部任务终态时触发，不会跳过未完成的配送；「须先开始配送」的原约束由该定义保证）'),
 ('ORDER', 'COMPLETE', 3, 1, '配送中订单允许手动完成'),
 ('ORDER', 'COMPLETE', 2, 0, '已支付订单须先开始配送'),
 ('ORDER', 'COMPLETE', 4, 0, '已完成订单禁止重复完成'),

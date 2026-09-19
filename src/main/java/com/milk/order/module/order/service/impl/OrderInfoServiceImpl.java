@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.milk.order.common.InstanceIdentity;
 import com.milk.order.common.constant.StateTransitions;
 import com.milk.order.common.constant.SystemConstants;
 import com.milk.order.common.enums.OrderStatus;
@@ -89,11 +90,21 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter PAY_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    /** 单号单调序列：同一秒内批量生成单号时，纯随机后缀可能撞唯一键 */
+    /**
+     * 单号内自增序列：同一秒内批量生成单号时，纯随机后缀可能撞唯一键。
+     *
+     * <p>注意它只是"实例内"的序号，因此单号里还必须带 {@link InstanceIdentity#TAG}
+     * ——否则多实例下两个实例的序号互相不知道，同一秒可能生成同一个订单号并撞 `uk_order_no`，
+     * 表现就是"下单失败"。</p>
+     */
     private static final AtomicLong NO_SEQ = new AtomicLong(System.currentTimeMillis() % 1000000);
 
+    /**
+     * 生成单号：{@code 前缀 + 秒级时间戳 + 实例标识 + 实例内自增序号}。
+     * 跨实例冲突需要"同一秒 + 同一序号 + 同一实例标识"，而实例标识来自随机数，实际不可能相同。
+     */
     private String nextNo(String prefix) {
-        return prefix + LocalDateTime.now().format(NO_FMT)
+        return prefix + LocalDateTime.now().format(NO_FMT) + InstanceIdentity.TAG
                 + String.format("%06d", NO_SEQ.incrementAndGet() % 1000000);
     }
 
@@ -717,11 +728,22 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
      *
      * <p>这是「层级化业务状态管理」的落点——父状态不由某个子任务直接改写，而由子过程整体聚合决定；
      * 对账补偿任务也复用本出口修复父状态漂移。</p>
+     *
+     * <p>允许从「已支付」或「配送中」聚合：正常路径是配送中；「已支付 + 子任务全终态」属于
+     * 配送联动与聚合写入<b>同时丢失</b>的漂移（3.4 补齐前这是补偿规则的覆盖盲区），
+     * 应直接聚合为已完成而不是停在已支付。闸门 {@code ORDER/AUTO_COMPLETE/2} 因此放开——
+     * 安全性由「只有全部任务终态才会走到这里」这一定义保证，而不是靠闸门去区分子过程状态
+     * （闸门看不见子过程，这正是规则/闸门分工的边界）。</p>
      */
     @Override
     public boolean completeOrderIfAllTasksDone(Long orderId) {
         OrderInfo order = getById(orderId);
-        if (order == null || !OrderStatus.DELIVERING.getCode().equals(order.getStatus())) {
+        if (order == null) {
+            return false;
+        }
+        int fromStatus = order.getStatus();
+        if (!OrderStatus.PAID.getCode().equals(fromStatus)
+                && !OrderStatus.DELIVERING.getCode().equals(fromStatus)) {
             return false;
         }
         if (deliveryTaskService.hasUnfinishedTask(orderId)) {
@@ -735,13 +757,13 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                         .entityType("order_info")
                         .entityId(orderId)
                         .bizNo(order.getOrderNo())
-                        .fromStatus(OrderStatus.DELIVERING.getCode())
+                        .fromStatus(fromStatus)
                         .toStatus(OrderStatus.COMPLETED.getCode())
-                        .remark("配送任务全部到达终态，过程聚合完成")
+                        .remark("配送任务全部到达终态，过程聚合完成（父状态 " + fromStatus + "）")
                         .build(),
                 () -> lambdaUpdate()
                         .eq(OrderInfo::getId, orderId)
-                        .eq(OrderInfo::getStatus, OrderStatus.DELIVERING.getCode())
+                        .eq(OrderInfo::getStatus, fromStatus)
                         .set(OrderInfo::getStatus, OrderStatus.COMPLETED.getCode())
                         .update());
         if (updated) {

@@ -23,8 +23,11 @@ public class InvariantScanReport {
     /** 自动修复生效合计 */
     private final int totalRepaired;
 
-    /** 未闭环合计（含修复失败与需人工核处） */
+    /** 未闭环合计（含修复失败、降级为仅告警与需人工核处） */
     private final int totalOpen;
+
+    /** 待人工合计（降级为仅告警 + 不变量默认等级即为仅告警的检出） */
+    private final int totalAlerts;
 
     /** 重复漂移合计 */
     private final int totalReopened;
@@ -39,10 +42,9 @@ public class InvariantScanReport {
         this.totalRepaired = results.stream().mapToInt(InvariantScanResult::getRepaired).sum();
         this.totalReopened = results.stream().mapToInt(InvariantScanResult::getReopened).sum();
         this.totalClosed = results.stream().mapToInt(InvariantScanResult::getClosed).sum();
-        this.totalOpen = results.stream()
-                .filter(r -> r.getSeverity() == InvariantSeverity.ALERT_ONLY)
-                .mapToInt(InvariantScanResult::getDetected).sum()
-                + results.stream().mapToInt(InvariantScanResult::getUnrepaired).sum();
+        // 待人工 = 按每条违规的实际等级统计的仅告警条数（不变量默认等级为告警的，其违规也带同一等级，只计一次）
+        this.totalAlerts = results.stream().mapToInt(InvariantScanResult::getAlerts).sum();
+        this.totalOpen = totalAlerts + results.stream().mapToInt(InvariantScanResult::getUnrepaired).sum();
     }
 
     public static InvariantScanReport of(List<InvariantScanResult> results) {

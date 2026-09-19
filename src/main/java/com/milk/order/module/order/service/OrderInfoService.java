@@ -47,7 +47,7 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 任务开始配送联动：订单为已支付时置为配送中，其余状态不动作（退款闸门的统一出口）；返回是否发生迁移 */
     boolean markDeliveringIfPaid(Long orderId);
 
-    /** 过程聚合出口：配送任务全部到达终态（已完成/已取消）时自动完成订单（仅配送中状态生效）；返回是否发生迁移 */
+    /** 过程聚合出口：配送任务全部到达终态（已完成/已取消）时自动完成订单（已支付/配送中状态生效；3.4 补齐前仅配送中）；返回是否发生迁移 */
     boolean completeOrderIfAllTasksDone(Long orderId);
 
     /** 完成订单（配送中 → 已完成） */

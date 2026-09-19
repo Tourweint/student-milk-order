@@ -1,6 +1,7 @@
 package com.milk.order.module.order.invariant;
 
 import com.milk.order.common.constant.StateTransitions;
+import com.milk.order.module.delivery.invariant.OrderTaskConsistencyInvariant;
 import com.milk.order.process.invariant.InvariantSeverity;
 import com.milk.order.process.invariant.InvariantViolation;
 import com.milk.order.process.invariant.ProcessInvariant;
@@ -40,6 +41,15 @@ public class OrderAggregationInvariant implements ProcessInvariant {
     @Override
     public InvariantSeverity severity() {
         return InvariantSeverity.AUTO_REPAIR;
+    }
+
+    /**
+     * 父状态聚合的判定依据是「子任务是否全部到达终态」，因此必须**等子过程网格补全之后**再判：
+     * 否则会先按当时的子集合把父过程判成完成、随后又被补进新的子任务。
+     */
+    @Override
+    public List<String> dependsOn() {
+        return List.of(OrderTaskConsistencyInvariant.CODE);
     }
 
     @Override

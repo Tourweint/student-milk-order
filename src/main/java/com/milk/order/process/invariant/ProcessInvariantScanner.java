@@ -3,12 +3,14 @@ package com.milk.order.process.invariant;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.milk.order.process.mapper.ProcessInvariantViolationMapper;
+import com.milk.order.reliability.IdempotencyGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +40,7 @@ public class ProcessInvariantScanner {
 
     private final List<ProcessInvariant> invariants;
     private final ProcessInvariantViolationMapper violationMapper;
+    private final IdempotencyGuard idempotencyGuard;
 
     /**
      * 执行一轮体检。
@@ -47,7 +50,7 @@ public class ProcessInvariantScanner {
      */
     public InvariantScanReport scan(boolean repair, int limit) {
         List<InvariantScanResult> results = new ArrayList<>(invariants.size());
-        for (ProcessInvariant invariant : invariants) {
+        for (ProcessInvariant invariant : orderedInvariants()) {
             results.add(scanOne(invariant, repair, limit));
         }
         InvariantScanReport report = InvariantScanReport.of(results);
@@ -81,21 +84,29 @@ public class ProcessInvariantScanner {
         int reopened = 0;
         int repaired = 0;
         int unrepaired = 0;
+        int alerts = 0;
 
         for (InvariantViolation violation : detected) {
             detectedIds.add(violation.getEntityId());
+            InvariantSeverity effective = effectiveSeverity(invariant, violation);
             ProcessInvariantViolation record = existing.get(violation.getEntityId());
             if (record == null) {
-                insertOpen(violation, now);
+                insertOpen(violation, effective, now);
                 opened++;
             } else if (!Integer.valueOf(STATUS_OPEN).equals(record.getStatus())) {
-                reopen(record, violation, now);
+                reopen(record, violation, effective, now);
                 reopened++;
             } else {
-                refresh(record.getId(), violation, now);
+                refresh(record.getId(), violation, effective, now);
             }
 
-            if (!repair || invariant.severity() != InvariantSeverity.AUTO_REPAIR) {
+            // 是否自动修复由**每条违规的实际等级**决定：同一条不变量下，
+            // 有的情况可逆可自动修，有的情况（如奶已出库在途）只能告警
+            if (!repair) {
+                continue;
+            }
+            if (effective != InvariantSeverity.AUTO_REPAIR) {
+                alerts++;
                 continue;
             }
             try {
@@ -125,8 +136,68 @@ public class ProcessInvariantScanner {
         return InvariantScanResult.builder()
                 .code(code).description(invariant.description()).severity(invariant.severity())
                 .detected(detected.size()).opened(opened).reopened(reopened)
-                .repaired(repaired).unrepaired(unrepaired).closed(closed)
+                .repaired(repaired).unrepaired(unrepaired).alerts(alerts).closed(closed)
                 .build();
+    }
+
+    /**
+     * 计算各项不变量的执行顺序：**按声明依赖的拓扑序**，同层内按编码升序（因此结果确定且可复现）。
+     *
+     * <p>不变量之间会相互影响（例如「任务网格补齐」会新增一条待配送子任务，
+     * 而「父过程终态守卫」正是要发现它），所以顺序必须由声明决定，而不是靠编码字典序碰巧排对。
+     * 依赖引用不存在的编码、或依赖成环时**直接失败**——这两种情况都属于配置错误，
+     * 静默退化成任意顺序只会让体检结果变得不可解释。</p>
+     */
+    private List<ProcessInvariant> orderedInvariants() {
+        // 先按编码排序：它同时充当"重复编码校验"和拓扑同层的稳定打破平局规则
+        List<ProcessInvariant> all = invariants.stream()
+                .sorted(Comparator.comparing(ProcessInvariant::code))
+                .toList();
+        Set<String> codes = new HashSet<>();
+        for (ProcessInvariant invariant : all) {
+            if (!codes.add(invariant.code())) {
+                throw new IllegalStateException("不变量编码重复：" + invariant.code());
+            }
+        }
+        for (ProcessInvariant invariant : all) {
+            for (String dependency : invariant.dependsOn()) {
+                if (!codes.contains(dependency)) {
+                    throw new IllegalStateException("不变量 " + invariant.code()
+                            + " 依赖了未注册的编码 " + dependency);
+                }
+            }
+        }
+
+        List<ProcessInvariant> ordered = new ArrayList<>(all.size());
+        Set<String> emitted = new HashSet<>();
+        while (ordered.size() < all.size()) {
+            ProcessInvariant next = all.stream()
+                    .filter(invariant -> !emitted.contains(invariant.code()))
+                    .filter(invariant -> emitted.containsAll(invariant.dependsOn()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "不变量依赖存在环路，无法确定执行顺序：剩余 " + remainingCodes(all, emitted)));
+            ordered.add(next);
+            emitted.add(next.code());
+        }
+        return ordered;
+    }
+
+    /**
+     * 当前解析出的执行顺序（编码列表）。
+     *
+     * <p>暴露出来是为了让"顺序"可被测试与人工审阅——顺序本身是设计的一部分，
+     * 不应该只存在于一次运行的日志里。</p>
+     */
+    public List<String> resolvedExecutionOrder() {
+        return orderedInvariants().stream().map(ProcessInvariant::code).toList();
+    }
+
+    private List<String> remainingCodes(List<ProcessInvariant> all, Set<String> emitted) {
+        return all.stream()
+                .map(ProcessInvariant::code)
+                .filter(code -> !emitted.contains(code))
+                .toList();
     }
 
     /** 读取某不变量的全部记录（每个主体一行），用于判断“新开 / 重开 / 仍在漂移” */
@@ -141,10 +212,19 @@ public class ProcessInvariantScanner {
         return map;
     }
 
-    private void insertOpen(InvariantViolation violation, LocalDateTime now) {
+    /**
+     * 取该条违规的实际处置等级：以违规自带的等级为准，未声明时回退到不变量的默认等级。
+     *
+     * <p>回退方向是「不自动修」——等级拿不准时宁可让人看，也不要自动改数据。</p>
+     */
+    private InvariantSeverity effectiveSeverity(ProcessInvariant invariant, InvariantViolation violation) {
+        return violation.getSeverity() == null ? invariant.severity() : violation.getSeverity();
+    }
+
+    private void insertOpen(InvariantViolation violation, InvariantSeverity severity, LocalDateTime now) {
         ProcessInvariantViolation record = new ProcessInvariantViolation();
         record.setInvariantCode(violation.getCode());
-        record.setSeverity(violation.getSeverity().name());
+        record.setSeverity(severity.name());
         record.setEntityType(violation.getEntityType());
         record.setEntityId(violation.getEntityId());
         record.setBizNo(violation.getBizNo());
@@ -152,15 +232,20 @@ public class ProcessInvariantScanner {
         record.setStatus(STATUS_OPEN);
         record.setReopenCount(0);
         record.setDetectedTime(now);
-        violationMapper.insert(record);
+        // 唯一键 uk_violation(invariant_code, entity_type, entity_id) 仲裁：多实例同时体检时，
+        // 两个实例可能都判到"该主体还没记录"而同时插入，冲突方按"已存在"跳过即可——
+        // 让数据库承担并发仲裁，而不是靠"先查再插"（同实验三暴露的那类缺陷）
+        idempotencyGuard.insertIgnoringDuplicate(() -> violationMapper.insert(record));
     }
 
-    private void reopen(ProcessInvariantViolation record, InvariantViolation violation, LocalDateTime now) {
+    private void reopen(ProcessInvariantViolation record, InvariantViolation violation,
+                        InvariantSeverity severity, LocalDateTime now) {
         violationMapper.update(null, new LambdaUpdateWrapper<ProcessInvariantViolation>()
                 .eq(ProcessInvariantViolation::getId, record.getId())
                 .set(ProcessInvariantViolation::getStatus, STATUS_OPEN)
                 .set(ProcessInvariantViolation::getReopenCount,
                         (record.getReopenCount() == null ? 0 : record.getReopenCount()) + 1)
+                .set(ProcessInvariantViolation::getSeverity, severity.name())
                 .set(ProcessInvariantViolation::getDetail, violation.getDetail())
                 .set(ProcessInvariantViolation::getBizNo, violation.getBizNo())
                 .set(ProcessInvariantViolation::getDetectedTime, now)
@@ -168,9 +253,11 @@ public class ProcessInvariantScanner {
                 .set(ProcessInvariantViolation::getRepairAction, null));
     }
 
-    private void refresh(Long id, InvariantViolation violation, LocalDateTime now) {
+    private void refresh(Long id, InvariantViolation violation, InvariantSeverity severity, LocalDateTime now) {
+        // 等级随本轮实际情况刷新：同一主体的违规可能从「待配送（可自动修）」演变为「配送中（只能告警）」
         violationMapper.update(null, new LambdaUpdateWrapper<ProcessInvariantViolation>()
                 .eq(ProcessInvariantViolation::getId, id)
+                .set(ProcessInvariantViolation::getSeverity, severity.name())
                 .set(ProcessInvariantViolation::getDetail, violation.getDetail())
                 .set(ProcessInvariantViolation::getBizNo, violation.getBizNo())
                 .set(ProcessInvariantViolation::getDetectedTime, now));
