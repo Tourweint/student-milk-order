@@ -1,26 +1,27 @@
 package com.milk.order.module.order.job;
 
-import com.milk.order.module.order.service.OrderInfoService;
+import com.milk.order.common.constant.StateTransitions;
 import com.milk.order.module.system.service.SysConfigService;
+import com.milk.order.process.reconcile.ProcessReconcileCoordinator;
+import com.milk.order.process.reconcile.ReconcileOutcome;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 /**
- * 业务过程聚合对账补偿任务（兜底层）。
+ * 业务过程聚合对账补偿任务（兜底通道）。
  *
  * <p>正常路径下，父订单状态由子过程驱动：任务开始配送时联动订单进入「配送中」，
- * 任务全部到达终态时聚合为「已完成」。但异步链路存在两条会丢失推进的缝隙：</p>
- * <ul>
- *   <li>任务已送出，但订单联动因进程中断/异常未被写入；</li>
- *   <li>最后一条子任务已终态，但聚合回调因异常未被写入。</li>
- * </ul>
+ * 任务全部到达终态时聚合为「已完成」；并且每次子过程状态变更都会在实时通道留下待办。
+ * 但实时通道也会失败（超重试上限即放弃），因此仍需要一条周期扫描的兜底通道：
+ * <b>实时通道追求收敛速度，兜底通道保证最终一致</b>，两者缺一不可。</p>
  *
- * <p>本任务定期扫描这两类「父状态与子过程集合不一致」的漂移并补偿修复，
- * 使系统不依赖「所有推进都恰好成功」，而是具备可检测、可恢复的最终一致性。
- * 补偿复用过程层统一迁移出口与聚合出口，天然幂等，可重复执行。
+ * <p>本任务只负责「触发一轮批量补偿」，具体补偿哪一类漂移、补偿成什么状态，
+ * 由 {@code process_reconcile_rule} 规则表决定，因此新增一类漂移无需改这里。
  * 可通过系统参数 {@code order.process.reconcile.enabled} 关闭。</p>
  */
 @Slf4j
@@ -29,7 +30,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class OrderProcessReconcileJob {
 
-    private final OrderInfoService orderInfoService;
+    private final ProcessReconcileCoordinator reconcileCoordinator;
     private final SysConfigService sysConfigService;
 
     /** 单轮单类最大处理量，防止历史脏数据把任务拖死 */
@@ -41,10 +42,16 @@ public class OrderProcessReconcileJob {
             return;
         }
         try {
-            int repaired = orderInfoService.reconcileOrderAggregation(BATCH_LIMIT);
-            if (repaired > 0) {
-                log.info("[过程对账] 本轮修复父子状态漂移 {} 个订单", repaired);
+            List<ReconcileOutcome> outcomes = reconcileCoordinator.reconcile(
+                    StateTransitions.SCENE_ORDER, BATCH_LIMIT);
+            long repaired = outcomes.stream().filter(ReconcileOutcome::isRepaired).count();
+            long failed = outcomes.stream().filter(ReconcileOutcome::isFailed).count();
+            if (repaired > 0 || failed > 0) {
+                log.info("[过程对账] 本轮探测到漂移 {} 条：补偿生效 {}，异常 {}",
+                        outcomes.size(), repaired, failed);
             }
+            outcomes.stream().filter(ReconcileOutcome::isRepaired)
+                    .forEach(outcome -> log.info("[过程对账] {}", outcome.summary()));
         } catch (Exception e) {
             log.error("[过程对账] 执行异常", e);
         }

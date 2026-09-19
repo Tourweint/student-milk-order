@@ -363,6 +363,8 @@ CREATE TABLE IF NOT EXISTS nutrition_intake (
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    -- 一个配送记录最多生成一条摄入记录：签收正常路径与体检补写路径都由数据库仲裁，避免重复补写
+    UNIQUE KEY uk_delivery_record (delivery_record_id),
     KEY idx_student_id (student_id),
     KEY idx_intake_date (intake_date),
     KEY idx_product_id (product_id)
@@ -437,3 +439,72 @@ CREATE TABLE IF NOT EXISTS operation_log (
     KEY idx_create_time (create_time),
     KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='操作日志表';
+
+-- ============================================================
+-- 10. 过程层扩展：补偿规则 / 不变量体检 / 实时自愈
+-- ============================================================
+
+-- 过程补偿规则表：把「父过程状态 + 子过程条件 → 补偿动作」从代码硬编码下沉为可配置规则。
+-- 与 state_transition_rule（迁移是否允许）分工：本表回答“发现漂移时该补偿成什么状态”。
+-- 三层分离：探测器按 parent_status 取候选 → 本表决策动作 → 统一迁移出口执行。
+CREATE TABLE IF NOT EXISTS process_reconcile_rule (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '规则ID',
+    name VARCHAR(64) NOT NULL COMMENT '规则名（管理端展示）',
+    parent_scene VARCHAR(30) NOT NULL COMMENT '父过程场景，如 ORDER',
+    parent_status INT NOT NULL COMMENT '父过程需满足的状态（候选筛选条件）',
+    child_condition VARCHAR(40) NOT NULL COMMENT '子过程条件编码：HAS_DISPATCHING_TASK/ALL_TASKS_TERMINAL/ALL_TASKS_CANCELLED/NONE',
+    action VARCHAR(30) NOT NULL COMMENT '补偿动作（复用 StateTransitions 动作码）',
+    target_status INT NOT NULL COMMENT '补偿后的父过程状态',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用：1-启用，0-停用',
+    description VARCHAR(255) COMMENT '规则说明',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_reconcile (parent_scene, parent_status, child_condition, action),
+    KEY idx_scene_enabled (parent_scene, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='过程补偿规则表（漂移检测/决策/执行中的决策层）';
+
+-- 过程不变量体检记录：把“不变量只在被验证时才成立”从一次性实验升级为运行期持续验证。
+-- 每轮体检重新求值：仍违规的更新明细，不再违规的自动闭环（status 置 1）。
+CREATE TABLE IF NOT EXISTS process_invariant_violation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID',
+    invariant_code VARCHAR(40) NOT NULL COMMENT '不变量编码，如 INV_QUOTA_LEDGER',
+    severity VARCHAR(16) NOT NULL COMMENT '严重度：AUTO_REPAIR-可自动修复，ALERT_ONLY-仅告警需人工',
+    entity_type VARCHAR(50) NOT NULL COMMENT '违规主体表名',
+    entity_id BIGINT NOT NULL COMMENT '违规主体主键',
+    biz_no VARCHAR(64) COMMENT '业务单号（便于人工定位）',
+    detail VARCHAR(500) COMMENT '违规明细（含期望值与实际值）',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '0-未闭环，1-已闭环（修复成功或复检通过），2-人工忽略',
+    reopen_count INT NOT NULL DEFAULT 0 COMMENT '重复漂移次数：已闭环后再次被检出则累加（自愈有效性度量）',
+    repair_action VARCHAR(64) COMMENT '修复动作 / 闭环原因 / 最近一次修复失败原因',
+    detected_time DATETIME NOT NULL COMMENT '最近一次检出时间',
+    handled_time DATETIME COMMENT '闭环时间',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    -- 每个（不变量 × 主体）只保留一行“当前一致性状态”：闭合后再次漂移则重新打开并累加 reopen_count，
+    -- 避免“同一主体反复漂移”在表里堆出多行而无法一眼看出当前是否一致
+    UNIQUE KEY uk_violation (invariant_code, entity_type, entity_id),
+    KEY idx_code_status (invariant_code, status),
+    KEY idx_detected_time (detected_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='过程不变量体检记录';
+
+-- 过程自愈待办（实时通道）：子过程状态变更的同一事务内落一条待办，
+-- 由秒级消费者立即驱动父过程聚合；重复消费幂等。与定时兜底构成双通道。
+CREATE TABLE IF NOT EXISTS process_pending_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '待办ID',
+    scene VARCHAR(30) NOT NULL COMMENT '待补偿的父过程场景，如 ORDER',
+    entity_type VARCHAR(50) NOT NULL COMMENT '父过程表名',
+    entity_id BIGINT NOT NULL COMMENT '父过程主键',
+    biz_no VARCHAR(64) COMMENT '业务单号',
+    trigger_action VARCHAR(30) NOT NULL COMMENT '触发动作（子过程终态动作），用于去重',
+    status TINYINT NOT NULL DEFAULT 0 COMMENT '0-待处理，1-已处理，2-已放弃（超重试上限，转兜底通道）',
+    retry_count INT NOT NULL DEFAULT 0 COMMENT '已重试次数',
+    next_retry_time DATETIME COMMENT '下次可处理时间（指数退避）',
+    last_error VARCHAR(255) COMMENT '最近一次失败原因',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_pending (scene, entity_id, trigger_action, status),
+    KEY idx_status_next (status, next_retry_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='过程自愈待办（实时通道）';

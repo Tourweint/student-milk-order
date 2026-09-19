@@ -41,6 +41,24 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     /** 该订单下是否存在未到达终态的任务（待配送/配送中）；全部终态时订单可自动完成 */
     boolean hasUnfinishedTask(Long orderId);
 
+    /** 该订单下是否存在任何任务（不变量求值用：「无任务」不能被当作「任务已全部终态」） */
+    boolean hasAnyTask(Long orderId);
+
+    /** 该订单下是否所有任务都已取消，且至少存在一条任务 */
+    boolean hasAllTasksCancelled(Long orderId);
+
+    /**
+     * 不变量修复（INV_TASK_RECORD）：把「任务已完成但签收记录未签收」的记录补齐为已签收。
+     * 经统一迁移出口执行并留痕，幂等，返回是否生效。
+     */
+    boolean repairRecordSigned(Long recordId);
+
+    /**
+     * 不变量修复（INV_SIGN_INTAKE）：为「已签收但缺营养摄入记录」的记录补生成摄入记录。
+     * 幂等（已存在则跳过），返回是否生效。
+     */
+    boolean repairIntakeForRecord(Long recordId);
+
     /** 任务详情 */
     DeliveryTaskVO getTaskDetail(Long id);
 

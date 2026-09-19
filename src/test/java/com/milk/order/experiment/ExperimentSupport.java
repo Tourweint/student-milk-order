@@ -3,6 +3,11 @@ package com.milk.order.experiment;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.product.service.DailyQuotaService;
+import com.milk.order.module.system.service.StateMachineService;
+import com.milk.order.process.invariant.ProcessInvariantScanner;
+import com.milk.order.process.pending.ProcessPendingTask;
+import com.milk.order.process.pending.ProcessPendingTaskService;
+import com.milk.order.process.reconcile.ProcessReconcileCoordinator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,11 +52,12 @@ public abstract class ExperimentSupport {
 
     private static final AtomicLong ORDER_SEQ = new AtomicLong(1);
 
-    /** 实验结束后需要清空的业务表（保留 state_transition_rule / sys_config 种子数据） */
+    /** 实验结束后需要清空的业务表（保留 state_transition_rule / sys_config / process_reconcile_rule 种子数据） */
     private static final List<String> CLEAN_TABLES = List.of(
             "nutrition_intake", "delivery_record", "delivery_task",
             "daily_quota_usage", "daily_quota", "payment_record",
             "order_item", "order_info", "process_transition_log",
+            "process_pending_task", "process_invariant_violation",
             "student", "class_info", "product", "product_category", "grade");
 
     @Autowired
@@ -62,6 +68,18 @@ public abstract class ExperimentSupport {
 
     @Autowired
     protected DailyQuotaService dailyQuotaService;
+
+    @Autowired
+    protected ProcessReconcileCoordinator reconcileCoordinator;
+
+    @Autowired
+    protected ProcessPendingTaskService pendingTaskService;
+
+    @Autowired
+    protected ProcessInvariantScanner invariantScanner;
+
+    @Autowired
+    protected StateMachineService stateMachineService;
 
     @Autowired
     protected JdbcTemplate jdbcTemplate;
@@ -155,6 +173,58 @@ public abstract class ExperimentSupport {
     protected int count(String sql, Object... args) {
         Integer value = jdbcTemplate.queryForObject(sql, Integer.class, args);
         return value == null ? 0 : value;
+    }
+
+    /** 某订单某配送日的任务主键（实验注入违规时定位用） */
+    protected long taskIdOf(long orderId, LocalDate deliveryDate) {
+        return id("SELECT id FROM delivery_task WHERE order_id = ? AND delivery_date = ?", orderId, deliveryDate);
+    }
+
+    /** 某任务对应的签收记录主键 */
+    protected long recordIdOf(long taskId) {
+        return id("SELECT id FROM delivery_record WHERE task_id = ?", taskId);
+    }
+
+    /** 走业务签收入口签收一条记录（等价于配送站在界面上签收） */
+    protected void signRecord(long recordId) {
+        com.milk.order.module.delivery.dto.SignRequest request =
+                new com.milk.order.module.delivery.dto.SignRequest();
+        request.setRecordId(recordId);
+        request.setSignPerson("实验签收");
+        deliveryTaskService.signRecord(request);
+    }
+
+    /** 启用/停用一条补偿规则（按规则名），用于验证“补偿由规则表驱动” */
+    protected void setReconcileRuleEnabled(String ruleName, boolean enabled) {
+        jdbcTemplate.update("UPDATE process_reconcile_rule SET enabled = ? WHERE name = ?",
+                enabled ? 1 : 0, ruleName);
+    }
+
+    /** 修改状态迁移闸门（按 scene/action/fromStatus 定位），成功后缓存立即刷新 */
+    protected void setTransitionAllowed(String scene, String action, int fromStatus, boolean allowed) {
+        Long ruleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM state_transition_rule WHERE scene = ? AND action = ? AND from_status = ?",
+                Long.class, scene, action, fromStatus);
+        stateMachineService.updateRule(ruleId, allowed ? 1 : 0, "实验临时调整");
+    }
+
+    /** 重新读取待办当前状态（重试次数/状态在库中，需回读才能正确驱动退避逻辑） */
+    protected ProcessPendingTask reloadPendingTask(long id) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id, scene, entity_id, trigger_action, status, retry_count, next_retry_time "
+                        + "FROM process_pending_task WHERE id = ?",
+                (rs, rowNum) -> {
+                    ProcessPendingTask task = new ProcessPendingTask();
+                    task.setId(rs.getLong("id"));
+                    task.setScene(rs.getString("scene"));
+                    task.setEntityId(rs.getLong("entity_id"));
+                    task.setTriggerAction(rs.getString("trigger_action"));
+                    task.setStatus(rs.getInt("status"));
+                    task.setRetryCount(rs.getInt("retry_count"));
+                    task.setNextRetryTime(rs.getTimestamp("next_retry_time") == null
+                            ? null : rs.getTimestamp("next_retry_time").toLocalDateTime());
+                    return task;
+                }, id);
     }
 
     protected long id(String sql, Object... args) {

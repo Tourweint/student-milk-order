@@ -103,7 +103,24 @@ INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark
 INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order.pay.timeout.minutes', '15', '待支付订单超时自动取消阈值（分钟）；超时后先查单对账兜底再取消'),
 ('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账'),
-('order.process.reconcile.enabled', 'true', '过程聚合对账补偿任务开关：修复父订单状态与子任务集合不一致的漂移');
+('order.process.reconcile.enabled', 'true', '过程聚合对账补偿任务开关：修复父订单状态与子任务集合不一致的漂移'),
+('process.pending.enabled', 'true', '过程实时自愈通道开关：消费自愈待办，秒级驱动父过程聚合'),
+('process.invariant.scan.enabled', 'true', '过程不变量体检开关：周期校验 6 类跨表不变量并自动修复可逆项');
+
+-- ============================================================
+-- 过程补偿规则种子（决策层）
+-- 前两条 = 重构前的硬编码行为，默认启用，保证行为等价；
+-- 第三条为“用配置表达新补偿”的示例，默认停用（需同时放开 state_transition_rule 的 ORDER/CANCEL/3）
+-- ============================================================
+INSERT INTO process_reconcile_rule
+    (name, parent_scene, parent_status, child_condition, action, target_status, enabled, description) VALUES
+('联动丢失补偿', 'ORDER', 2, 'HAS_DISPATCHING_TASK', 'DELIVER', 3, 1,
+ '订单仍为已支付但已有子任务开始配送 → 补偿推进为配送中（原硬编码场景一）'),
+('聚合丢失补偿', 'ORDER', 3, 'ALL_TASKS_TERMINAL', 'AUTO_COMPLETE', 4, 1,
+ '订单仍为配送中但子任务已全部到达终态 → 补偿聚合为已完成（原硬编码场景二）'),
+('全取消补偿', 'ORDER', 3, 'ALL_TASKS_CANCELLED', 'CANCEL', 5, 0,
+ '订单配送中但子任务已全部取消 → 补偿为已退订。启用前需同步放开 state_transition_rule 中 ORDER/CANCEL/3，'
+ '否则统一出口会以“规则禁止”拒绝该补偿（配置化规则之间的依赖）');
 
 -- ============================================================
 -- 状态迁移规则种子（默认规则 = 现行硬编码行为；管理端可在线调整）

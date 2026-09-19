@@ -42,6 +42,7 @@ import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.service.DataScopeResolver;
 import com.milk.order.process.ProcessTransitionExecutor;
 import com.milk.order.process.TransitionSpec;
+import com.milk.order.process.pending.ProcessPendingTaskService;
 import com.milk.order.reliability.IdempotencyGuard;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +80,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final ProcessTransitionExecutor processTransitionExecutor;
     private final IdempotencyGuard idempotencyGuard;
     private final DailyQuotaService dailyQuotaService;
+    private final ProcessPendingTaskService pendingTaskService;
 
     /**
      * 任务开始配送联动订单状态（已支付→配送中）须经 OrderInfoService 统一状态机出口；
@@ -262,6 +264,11 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         DeliveryTask task = getTask(taskId);
         // 过程层严格迁移：规则禁止（如已完成任务）抛异常，CAS 与并发批量送出竞争失败也抛异常
         processTransitionExecutor.require(dispatchSpec(task), () -> casDispatch(task));
+        // 与批量口径保持一致：单条送出同样要联动订单已支付→配送中。
+        // 原先单条路径缺这一步，会让订单停在已支付而子任务已在配送中——正是父状态漂移的一类来源，
+        // 修复后由兜底通道仍可发现并纠正，但正常路径就不该产生漂移。
+        orderInfoService.markDeliveringIfPaid(task.getOrderId());
+        enqueueOrderAggregation(task.getOrderId(), StateTransitions.ACTION_DISPATCH);
     }
 
     @Override
@@ -297,9 +304,11 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             // 无论本轮是否由本请求送出，该订单都应联动进入配送中（订单侧幂等）
             orderIds.add(task.getOrderId());
         }
-        // 退款闸门：任务开始配送即联动订单已支付→配送中，此后订单不可自助退订
+        // 退款闸门：任务开始配送即联动订单已支付→配送中，此后订单不可自助退订；
+        // 同时落实时待办——即使同步联动被规则表临时挡住，秒级消费者也会按最新状态补上
         for (Long orderId : orderIds) {
             orderInfoService.markDeliveringIfPaid(orderId);
+            enqueueOrderAggregation(orderId, StateTransitions.ACTION_DISPATCH);
         }
         return dispatched;
     }
@@ -369,6 +378,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                         .set(DeliveryTask::getStatus, 4)
                         .set(DeliveryTask::getRemark, cancelReason)
                         .update());
+        // 实时通道：任务已到终态，父订单需要重新聚合（同事务内落待办）
+        enqueueOrderAggregation(task.getOrderId(), StateTransitions.ACTION_TASK_CANCEL);
         // 同步取消关联签收记录（仅未签收记录生效，不影响已签收/已拒收结果）
         markRecordRejected(taskId, "任务已取消");
         // 任务全部到达终态时自动完成订单（父状态聚合出口）
@@ -460,6 +471,26 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                 .eq(DeliveryTask::getOrderId, orderId)
                 .in(DeliveryTask::getStatus, Arrays.asList(1, 2)));
         return count != null && count > 0;
+    }
+
+    @Override
+    public boolean hasAnyTask(Long orderId) {
+        Long count = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId));
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean hasAllTasksCancelled(Long orderId) {
+        Long total = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId));
+        if (total == null || total == 0) {
+            return false; // 无任务不算“全部取消”
+        }
+        Long cancelled = baseMapper.selectCount(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .eq(DeliveryTask::getStatus, 4));
+        return cancelled != null && cancelled.equals(total);
     }
 
     // ==================== 签收 / 拒收 ====================
@@ -580,6 +611,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         // 生成营养摄入记录
         generateNutritionIntake(record, task);
 
+        // 实时通道：任务已到终态，父订单需要重新聚合（同事务内落待办）
+        enqueueOrderAggregation(task.getOrderId(), StateTransitions.ACTION_SIGN);
         // 任务全部到达终态时自动完成订单（父状态聚合出口）
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
     }
@@ -637,6 +670,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                         .set(DeliveryRecord::getRemark, rejectReason)) > 0);
         task.setStatus(4); // 已取消
 
+        // 实时通道：任务已到终态，父订单需要重新聚合（同事务内落待办）
+        enqueueOrderAggregation(task.getOrderId(), StateTransitions.ACTION_REJECT);
         // 任务全部到达终态时自动完成订单（父状态聚合出口）
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
     }
@@ -710,8 +745,9 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             }
         }
         // 缺货只取消该期任务，不影响订单其余期次；已完成任务不受影响
-        // 订单任务全部到达终态时自动完成（如散订单期即全部任务）
+        // 订单任务全部到达终态时自动完成（如散订单期即全部任务）；同事务落实时待办
         for (Long orderId : orderIds) {
+            enqueueOrderAggregation(orderId, StateTransitions.ACTION_STOCKOUT_CANCEL);
             orderInfoService.completeOrderIfAllTasksDone(orderId);
         }
         return count;
@@ -754,6 +790,10 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             // 同步取消未签收的签收记录（仅 sign_status=2 生效）
             markRecordRejected(task.getId(), "订单已退订");
             count++;
+        }
+        if (count > 0) {
+            // 实时通道：任务已到终态，父订单（已退订）需要重新聚合核对（同事务内落待办）
+            enqueueOrderAggregation(orderId, StateTransitions.ACTION_TASK_CANCEL);
         }
         return count;
     }
@@ -917,6 +957,68 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         vo.setTotal(records.size());
         vo.setClasses(classList);
         return vo;
+    }
+
+    /**
+     * 实时通道：在子过程状态变更的同一事务内落一条「父过程待聚合」待办。
+     *
+     * <p>它把「父过程还需要重新聚合」从调用方的自觉变成数据事实：即使某条路径漏掉同步聚合调用、
+     * 或同步聚合被规则表临时挡住，待办仍在，秒级消费者会按父过程最新状态补上。
+     * 去重键含 triggerAction，因此批量送出 78 条任务也只产生一行待办。</p>
+     */
+    private void enqueueOrderAggregation(Long orderId, String triggerAction) {
+        if (orderId == null) {
+            return;
+        }
+        pendingTaskService.enqueue(StateTransitions.SCENE_ORDER, "order_info", orderId, null, triggerAction);
+    }
+
+    // ==================== 不变量修复（由过程体检任务调用） ====================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean repairRecordSigned(Long recordId) {
+        DeliveryRecord record = deliveryRecordMapper.selectById(recordId);
+        if (record == null || Integer.valueOf(1).equals(record.getSignStatus())) {
+            return false; // 已不存在或已签收（并发已被修复）
+        }
+        // 修复也必须走统一迁移出口：既能留痕，又不至于成为绕过可靠性层的旁路
+        return processTransitionExecutor.attempt(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_DELIVERY_RECORD)
+                        .action(StateTransitions.ACTION_SIGN)
+                        .sceneText("配送记录")
+                        .entityType("delivery_record")
+                        .entityId(recordId)
+                        .fromStatus(record.getSignStatus())
+                        .toStatus(1)
+                        .ruleGoverned(false)
+                        .operator("system")
+                        .remark("不变量体检修复：任务已完成但签收记录未签收")
+                        .build(),
+                () -> deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                        .eq(DeliveryRecord::getId, recordId)
+                        .eq(DeliveryRecord::getSignStatus, record.getSignStatus())
+                        .set(DeliveryRecord::getSignStatus, 1)
+                        .set(DeliveryRecord::getSignTime, LocalDateTime.now())
+                        .set(DeliveryRecord::getSignPerson, "system(体检修复)")) > 0);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean repairIntakeForRecord(Long recordId) {
+        DeliveryRecord record = deliveryRecordMapper.selectById(recordId);
+        if (record == null || !Integer.valueOf(1).equals(record.getSignStatus())) {
+            return false; // 仅已签收记录需要营养摄入
+        }
+        Long exists = nutritionIntakeMapper.selectCount(new LambdaQueryWrapper<NutritionIntake>()
+                .eq(NutritionIntake::getDeliveryRecordId, recordId));
+        if (exists != null && exists > 0) {
+            return false; // 已存在（并发已被修复）
+        }
+        DeliveryTask task = getTask(record.getTaskId());
+        // 与正常签收同一段生成逻辑；唯一键 uk_delivery_record 仲裁并发重复补写
+        return idempotencyGuard.insertIgnoringDuplicate(() -> generateNutritionIntake(record, task));
     }
 
     // ==================== 内部工具 ====================

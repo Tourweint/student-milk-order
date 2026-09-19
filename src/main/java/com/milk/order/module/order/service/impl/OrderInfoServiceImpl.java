@@ -535,52 +535,6 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         return count;
     }
 
-    /**
-     * 过程聚合对账补偿（定时任务兜底）：扫描「父状态与子过程不一致」的订单并修复。
-     *
-     * <p>覆盖两类漂移：</p>
-     * <ol>
-     *   <li>订单仍为已支付，但已有子任务处于配送中 → 补偿推进为配送中（联动丢失）；</li>
-     *   <li>订单仍为配送中，但子任务已全部到达终态 → 补偿推进为已完成（聚合回调丢失）。</li>
-     * </ol>
-     *
-     * <p>补偿复用统一迁移出口与聚合出口，因此天然幂等：重复执行不会产生额外的状态变更。</p>
-     *
-     * @param limit 单轮单类最多处理的订单数，避免历史脏数据拖死定时任务
-     * @return 实际修复的订单数
-     */
-    @Override
-    public int reconcileOrderAggregation(int limit) {
-        int safeLimit = Math.max(1, limit);
-        int repaired = 0;
-        // 场景一：已支付但子任务已开始配送 —— 补齐“配送中”联动
-        List<OrderInfo> paidOrders = lambdaQuery()
-                .eq(OrderInfo::getStatus, OrderStatus.PAID.getCode())
-                .orderByAsc(OrderInfo::getId)
-                .last("LIMIT " + safeLimit)
-                .list();
-        for (OrderInfo order : paidOrders) {
-            if (deliveryTaskService.hasDispatchingTask(order.getId())
-                    && self.markDeliveringIfPaid(order.getId())) {
-                repaired++;
-                log.info("[过程对账] 订单 {} 已支付但子任务已配送，补偿推进为配送中", order.getOrderNo());
-            }
-        }
-        // 场景二：配送中但子任务全部到达终态 —— 补齐“已完成”聚合
-        List<OrderInfo> deliveringOrders = lambdaQuery()
-                .eq(OrderInfo::getStatus, OrderStatus.DELIVERING.getCode())
-                .orderByAsc(OrderInfo::getId)
-                .last("LIMIT " + safeLimit)
-                .list();
-        for (OrderInfo order : deliveringOrders) {
-            if (self.completeOrderIfAllTasksDone(order.getId())) {
-                repaired++;
-                log.info("[过程对账] 订单 {} 子任务已全部终态，补偿聚合为已完成", order.getOrderNo());
-            }
-        }
-        return repaired;
-    }
-
     @Override
     public boolean cancelTimeoutOrder(Long id, int timeoutMinutes) {
         OrderInfo order = getById(id);

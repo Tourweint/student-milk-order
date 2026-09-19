@@ -270,14 +270,8 @@ public class StatsServiceImpl implements StatsService {
     @Override
     public Map<String, Object> nutritionDashboard(Long classId) {
         LambdaQueryWrapper<NutritionIntake> wrapper = new LambdaQueryWrapper<>();
-        // 数据权限：家长仅本人孩子；班主任强制本班（忽略前端传参）；管理员不限。
-        // 营养摄入记录是学生维度的明细数据，必须与订单/配送同口径收窄，否则班主任会看到全校摄入数据。
-        DataScope scope = dataScopeResolver.resolve();
-        if (scope.getStudentId() != null) {
-            wrapper.eq(NutritionIntake::getStudentId, scope.getStudentId());
-        } else if (scope.getClassId() != null) {
-            classId = scope.getClassId();
-        }
+        // 口径说明：统计看板(/api/stats/**)面向 ADMIN/TEACHER，统一为「校级口径」，不按班主任本班收窄；
+        // classId 仅作为前端可选筛选条件传入。家长角色无该接口权限（见 SecurityConfig）。
         if (classId != null) {
             // 通过学生关联班级
             List<Student> students = studentMapper.selectList(

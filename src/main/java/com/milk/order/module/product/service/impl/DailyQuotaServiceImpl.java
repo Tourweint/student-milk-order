@@ -323,6 +323,30 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
         }
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean reconcileUsedQuota(Long quotaId, int ledgerBoxes) {
+        DailyQuota quota = getById(quotaId);
+        if (quota == null || quota.getUsedQuota() == null) {
+            return false;
+        }
+        int expected = Math.max(0, ledgerBoxes);
+        if (quota.getUsedQuota() == expected) {
+            return false; // 已被并发修复或本就不再漂移
+        }
+        // 以台账为准重算；条件更新（以读到的新值为条件）避免覆盖并发扣减/回补的结果
+        boolean updated = lambdaUpdate()
+                .eq(DailyQuota::getId, quotaId)
+                .eq(DailyQuota::getUsedQuota, quota.getUsedQuota())
+                .set(DailyQuota::getUsedQuota, expected)
+                .update();
+        if (updated) {
+            log.warn("[不变量修复] 配额池 #{}（{} 品种{}）已售数由 {} 按台账重算为 {}",
+                    quotaId, quota.getQuotaDate(), quota.getProductId(), quota.getUsedQuota(), expected);
+        }
+        return updated;
+    }
+
     private DailyQuota getByDateAndProduct(LocalDate quotaDate, Long productId) {
         return getOne(new LambdaQueryWrapper<DailyQuota>()
                 .eq(DailyQuota::getQuotaDate, quotaDate)

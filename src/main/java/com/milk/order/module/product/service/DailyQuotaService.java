@@ -34,4 +34,17 @@ public interface DailyQuotaService extends IService<DailyQuota> {
 
     /** 按订单+品种+日期回补配额（缺货取消单期任务时使用：只回补该日期该品种的份额，不影响订单其他期次） */
     void restoreForOrderProductDate(Long orderId, Long productId, LocalDate quotaDate);
+
+    /**
+     * 不变量修复：以台账合计为准重算某池子的已售盒数（INV_QUOTA_LEDGER）。
+     *
+     * <p>只在不变量体检查出「used_quota ≠ 台账合计」时由修复器调用。
+     * 以台账为重算方向是因为台账是每一笔占用的事实记录，used_quota 只是它的汇总；
+     * 条件更新保证与并发扣减/回补竞争时只有一方生效，返回 false 表示已无需修复。</p>
+     *
+     * @param quotaId     配额池主键
+     * @param ledgerBoxes 台账合计（期望的已售盒数）
+     * @return true 表示本次重算生效
+     */
+    boolean reconcileUsedQuota(Long quotaId, int ledgerBoxes);
 }

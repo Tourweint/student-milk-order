@@ -38,7 +38,9 @@ src/main/java/com/milk/order/
   config/       # Spring、MyBatis-Plus、Jackson、安全配置
   security/     # JWT 解析和认证过滤器
   exception/    # BusinessException 与全局异常处理
-  process/      # 过程层：状态迁移统一出口、迁移规格、迁移台账（横切，不依赖业务 Service）
+  process/      # 过程层：状态迁移统一出口与迁移台账；reconcile/ 补偿规则引擎（探测-决策-执行）、
+                #   pending/ 实时自愈待办、invariant/ 跨表不变量体检、job/ 实时消费与体检调度
+                #   （横切，不依赖业务 Service；业务侧实现 ParentProcessProbe/ParentProcessAggregator/ProcessInvariant）
   reliability/  # 可靠性层：幂等守卫等跨模块可靠执行原语
   module/<name>/
     controller/ # REST 入口
@@ -48,7 +50,8 @@ src/main/java/com/milk/order/
 src/main/resources/
   application.yml
   sql/schema.sql, sql/data.sql
-src/test/java/com/milk/order/experiment/   # 并发/幂等/异常恢复实验
+src/test/java/com/milk/order/experiment/   # 并发/幂等/异常恢复实验（实验一~八）
+src/test/java/com/milk/order/contract/     # 状态机契约矩阵测试（规则覆盖/安全禁止/台账可回放）
 src/test/resources/application-test.yml    # 实验专用配置（独立实验库、关闭定时任务）
 school-ui/src/
   api/          # 后端 API 调用封装
@@ -86,7 +89,14 @@ school-ui/src/
 - **规则种子**：状态迁移是否允许由 `state_transition_rule` 白名单驱动；新增状态或动作必须同步补
   `src/main/resources/sql/data.sql` 的规则种子，否则该迁移会被拒绝。
 - **父子状态**：父订单状态只能由子过程聚合决定（`markDeliveringIfPaid` / `completeOrderIfAllTasksDone`），
-  不得由某个子任务直接改写；漂移由 `reconcileOrderAggregation` 对账补偿。
+  不得由某个子任务直接改写。子过程状态变更时必须在**同一事务内**
+  `ProcessPendingTaskService.enqueue` 一条父过程自愈待办（实时通道）；漂移的探测与补偿由
+  `ProcessReconcileEngine` + `ProcessReconcileCoordinator` 按 `process_reconcile_rule` 规则表执行，
+  补偿动作只能经 `ParentProcessAggregator` 落回统一迁移出口——**不要新增硬编码的补偿 `if`**。
+- **补偿规则**：`process_reconcile_rule` 决定「什么漂移补偿成什么状态」，可在线启停；启用一条新规则前
+  必须确认 `state_transition_rule` 放开了对应迁移（否则补偿会被闸门拒绝）。新规则默认设为停用。
+- **不变量体检**：新增跨表约束时登记为 `ProcessInvariant`（探测只读、修复必须走业务出口）；
+  涉资金或需业务判断的一律 `ALERT_ONLY`，不得自动改。判定口径要考虑「系统本来就在处理中」的中间态。
 - **顺序**：同一动作同时涉及状态迁移与副作用（扣资源、写流水、展开任务）时，必须先 CAS 抢占状态，
   落败方立即中止。顺序颠倒会产生重复副作用并互撞业务唯一键。
 - **资源变更**：只能经 `DailyQuotaService` —— 扣减必须「`selectForUpdate` 行锁读 + `used_quota + n <= total_quota`
@@ -125,7 +135,7 @@ school-ui/src/
 ```powershell
 # 后端（仓库根目录）
 mvn clean compile
-mvn test                       # 含 4 组并发/幂等/异常恢复实验（需先准备实验库）
+mvn test                       # 含 8 组并发/幂等/异常恢复实验 + 契约矩阵测试（需先准备实验库）
 mvn spring-boot:run
 
 # 前端
