@@ -72,7 +72,7 @@ public class SecurityConfig {
                 .antMatchers(HttpMethod.PUT, "/api/order/complete/**").hasAnyRole("ADMIN", "TEACHER")
                 // 订单数据仅学校侧角色与家长可见（配送站按任务配送，不接触订单数据）
                 .antMatchers("/api/order/**").hasAnyRole("ADMIN", "TEACHER", "PARENT")
-                // 其余接口需认证：续订、奶品/营养 GET 等三端共用，数据范围由 Service 层数据权限控制
+                // 其余接口需认证：奶品/营养 GET 等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()
                 .exceptionHandling()

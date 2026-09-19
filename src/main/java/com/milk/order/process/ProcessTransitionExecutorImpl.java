@@ -16,7 +16,7 @@ import java.util.function.BooleanSupplier;
  * 状态迁移统一执行器实现：规则校验 → CAS 条件更新 → 迁移台账。
  *
  * <p>依赖方向：业务模块 → 过程层 → { 状态规则服务, 迁移台账 Mapper }。
- * 过程层不反向依赖任何业务 Service，因此可被订单、配送、订阅等模块共同复用。</p>
+ * 过程层不反向依赖任何业务 Service，因此可被订单、配送等模块共同复用。</p>
  */
 @Slf4j
 @Service

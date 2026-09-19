@@ -38,7 +38,7 @@ node "应用服务器\n(Spring Boot :8090)" as APP {
   component "Controller层" as CTRL
   component "Service业务层" as SVC
   component "Mapper持久层\n(MyBatis-Plus)" as MAPPER
-  component "定时任务\n(自动续订/超时取消/对账)" as JOB
+  component "定时任务\n(超时取消/支付对账/过程对账/自动签收)" as JOB
   component "微信支付模拟器" as PAYSIM
   component "Excel导入导出\n(POI)" as POI
   JWT --> CTRL

@@ -380,11 +380,31 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
      * 已完成签收/已拒收的记录不受影响，避免并发下覆盖既有结果
      */
     private void markRecordRejected(Long taskId, String remark) {
-        deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
-                .eq(DeliveryRecord::getTaskId, taskId)
-                .eq(DeliveryRecord::getSignStatus, 2)
-                .set(DeliveryRecord::getSignStatus, 3)
-                .set(DeliveryRecord::getRemark, remark));
+        // 逐条经过程层执行器提交（宽松迁移），使「每一次状态迁移都留痕」这一不变量在联动路径上也成立；
+        // 否则退订/缺货取消联动作废签收记录时，台账里查不到这次状态变更。
+        List<DeliveryRecord> pendingRecords = deliveryRecordMapper.selectList(
+                new LambdaQueryWrapper<DeliveryRecord>()
+                        .eq(DeliveryRecord::getTaskId, taskId)
+                        .eq(DeliveryRecord::getSignStatus, 2));
+        for (DeliveryRecord record : pendingRecords) {
+            processTransitionExecutor.attempt(
+                    TransitionSpec.builder()
+                            .scene(StateTransitions.SCENE_DELIVERY_RECORD)
+                            .action(StateTransitions.ACTION_REJECT)
+                            .sceneText("配送记录")
+                            .entityType("delivery_record")
+                            .entityId(record.getId())
+                            .fromStatus(2)
+                            .toStatus(3)
+                            .ruleGoverned(false)
+                            .remark(remark)
+                            .build(),
+                    () -> deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                            .eq(DeliveryRecord::getId, record.getId())
+                            .eq(DeliveryRecord::getSignStatus, 2)
+                            .set(DeliveryRecord::getSignStatus, 3)
+                            .set(DeliveryRecord::getRemark, remark)) > 0);
+        }
     }
 
     /** 某配送日期按班级汇总任务状态数量（配送站面板今日概览） */
@@ -689,7 +709,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                 dailyQuotaService.restoreForOrderProductDate(orderId, productId, date);
             }
         }
-        // 缺货只取消单期任务，不影响主订阅计划：续订照常，下期任务由续订订单展开生成
+        // 缺货只取消该期任务，不影响订单其余期次；已完成任务不受影响
         // 订单任务全部到达终态时自动完成（如散订单期即全部任务）
         for (Long orderId : orderIds) {
             orderInfoService.completeOrderIfAllTasksDone(orderId);

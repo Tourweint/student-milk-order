@@ -52,7 +52,7 @@
     <!-- 缺货批量取消对话框 -->
     <el-dialog v-model="stockoutVisible" title="配送前缺货批量取消" width="480px">
       <el-alert type="warning" :closable="false"
-        title="仅取消所选日期+奶品的「待配送」任务；已完成/配送中任务不受影响，零散订单当日配额自动回补，主订阅照常。" />
+        title="仅取消所选日期+奶品的「待配送」任务；已完成/配送中任务不受影响；零散订单当日配额按台账自动回补。" />
       <el-form label-width="80px" style="margin-top: 14px">
         <el-form-item label="配送日期" required>
           <el-date-picker v-model="stockoutForm.deliveryDate" type="date" placeholder="选择日期"

@@ -9,8 +9,7 @@
     "pages/order-list/order-list",
     "pages/order-detail/order-detail",
     "pages/nutrition/nutrition",
-    "pages/delivery/delivery",
-    "pages/subscription/subscription"
+    "pages/delivery/delivery"
   ],
   "window": {
     "navigationBarTitleText": "学生奶订购",

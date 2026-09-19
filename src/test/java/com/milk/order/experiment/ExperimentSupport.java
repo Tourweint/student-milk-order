@@ -51,7 +51,7 @@ public abstract class ExperimentSupport {
     private static final List<String> CLEAN_TABLES = List.of(
             "nutrition_intake", "delivery_record", "delivery_task",
             "daily_quota_usage", "daily_quota", "payment_record",
-            "order_item", "order_info", "subscription_plan", "process_transition_log",
+            "order_item", "order_info", "process_transition_log",
             "student", "class_info", "product", "product_category", "grade");
 
     @Autowired

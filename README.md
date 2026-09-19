@@ -21,7 +21,7 @@
 - MyBatis-Plus 3.5.3（数据访问）
 - MySQL 8 / MariaDB 10.6+（数据库，事务隔离级别统一 `READ_COMMITTED`）
 - Apache POI（Excel 导入导出）
-- Spring Scheduler（定时任务：超时兜底、支付对账、过程聚合对账、自动签收、自动续订）
+- Spring Scheduler（定时任务：超时兜底、支付对账、过程聚合对账、自动签收）
 
 ### 前端（Web 管理端）
 - Vue 3 + TypeScript + Vite
@@ -46,7 +46,6 @@
 | 营养统计 | 营养成分维护、签收自动生成摄入记录、摄入统计与报表 |
 | 数据可视化 | 仪表盘、订单趋势、品类占比、班级排行、覆盖率 |
 | 系统管理 | 系统参数在线配置、状态迁移规则在线配置、过程迁移台账、操作日志 |
-| 自动续订 | 续订计划生命周期（续订/暂停/恢复/终止），状态迁移经规则表白名单校验 |
 | 过程层 / 可靠性层 | 状态迁移统一出口（规则校验 + CAS 条件更新 + 迁移留痕）、幂等守卫、对账补偿机制 |
 
 ## 项目结构
@@ -85,8 +84,7 @@ student-milk-order/
 │   │       ├── delivery/   # 配送管理模块（含自动签收兜底 Job）
 │   │       ├── nutrition/  # 营养统计模块
 │   │       ├── stats/      # 数据可视化模块
-│   │       ├── system/     # 系统管理（参数配置、状态迁移规则、迁移台账）
-│   │       └── subscription/ # 自动续订模块
+│   │       └── system/     # 系统管理（参数配置、状态迁移规则、迁移台账）
 │   ├── main/resources/
 │   │   ├── application.yml
 │   │   └── sql/            # 数据库脚本
@@ -157,7 +155,7 @@ mvn test
 
 - [业务过程与可靠执行模型](docs/基线文档/业务过程与可靠执行模型.md) — 问题定义、四层模型、过程层与父子状态机、不变量清单
 - [可靠性设计](docs/基线文档/可靠性设计.md) — 幂等 / CAS / 行锁 / 台账 / 对账补偿的机制与判定口径
-- [实验设计与结果](docs/实验/实验设计与结果.md) — 4 组并发实验的实测数据与暴露的 4 个缺陷
+- [实验设计与结果](docs/实验/实验设计与结果.md) — 4 组并发实验的实测数据与暴露的 5 个缺陷
 - [选题与章节结构](docs/论文/选题与章节结构.md) — 论文题目层次、章节结构、图表清单、答辩问答要点
 
 其他：
@@ -190,7 +188,7 @@ miniprogram/
 ├── utils/
 │   ├── request.js                 wx.request 封装（token 注入、401 处理、query 拼接）
 │   └── auth.js                    登录态管理（token/用户信息存取）
-├── api/                           接口模块：auth/product/order/nutrition/delivery/subscription/student
+├── api/                           接口模块：auth/product/order/nutrition/delivery/student
 └── pages/
     ├── login/                     登录绑定页（wx.login → wx-login → wx-bind）
     ├── index/                     首页（套餐 + 奶品列表）
@@ -200,7 +198,6 @@ miniprogram/
     ├── order-detail/              订单详情（明细、支付信息、退订、去支付/退订操作）
     ├── nutrition/                 营养统计（近7/30天汇总 + 每日摄入 + 摄入记录）
     ├── delivery/                  配送记录（配送日期、奶品、签收状态）
-    ├── subscription/              自动续订（计划列表、开启/关闭、立即续订）
     └── mine/                      我的（用户信息、功能入口、退出）
 ```
 

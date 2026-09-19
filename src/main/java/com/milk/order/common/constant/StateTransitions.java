@@ -17,8 +17,6 @@ public final class StateTransitions {
     public static final String SCENE_ORDER = "ORDER";
     /** 配送任务状态机（delivery_task.status） */
     public static final String SCENE_DELIVERY_TASK = "DELIVERY_TASK";
-    /** 续订计划状态机（subscription_plan.status） */
-    public static final String SCENE_SUBSCRIPTION_PLAN = "SUBSCRIPTION_PLAN";
     /**
      * 配送记录子状态机（delivery_record.sign_status）
      *
@@ -52,15 +50,4 @@ public final class StateTransitions {
     public static final String ACTION_REJECT = "REJECT";
     /** 缺货批量取消（仅待配送→已取消；已完成任务禁止回退） */
     public static final String ACTION_STOCKOUT_CANCEL = "STOCKOUT_CANCEL";
-
-    // ==================== 续订计划动作 ====================
-
-    /** 执行续订（默认仅已开启状态可续订） */
-    public static final String ACTION_RENEW = "RENEW";
-    /** 暂停续订（已开启→已暂停） */
-    public static final String ACTION_PAUSE = "PAUSE";
-    /** 恢复续订（已暂停→已开启） */
-    public static final String ACTION_RESUME = "RESUME";
-    /** 关闭续订（已开启/已暂停→已关闭） */
-    public static final String ACTION_CLOSE = "CLOSE";
 }

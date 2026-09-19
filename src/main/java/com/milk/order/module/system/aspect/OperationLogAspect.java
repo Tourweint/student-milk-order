@@ -123,7 +123,6 @@ public class OperationLogAspect {
         String module = url.replace("/api/", "").split("/")[0];
         if (url.contains("/pay/")) action = "支付";
         else if (url.contains("/sign")) action = "签收";
-        else if (url.contains("/trigger/")) action = "手动续订";
         else if (url.contains("/login")) action = "登录";
         else if (url.contains("/generate")) action = "生成";
         return action + " - " + module;

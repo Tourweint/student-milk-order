@@ -200,22 +200,6 @@ package "配送管理" {
   }
 }
 
-package "自动续订" {
-  class SubscriptionPlan <<entity>> {
-    id : Long
-    studentId : Long
-    userId : Long
-    packageId : Long
-    originalOrderId : Long
-    cycleType : Integer
-    status : Integer
-    nextRenewalTime : LocalDateTime
-    lastRenewalTime : LocalDateTime
-    pauseTime : LocalDateTime
-    pauseReason : String
-  }
-}
-
 package "系统管理" {
   class OperationLog <<entity>> {
     id : Long
@@ -241,6 +225,19 @@ package "系统管理" {
     configKey : String
     configValue : String
     description : String
+  }
+  class ProcessTransitionLog <<entity>> {
+    id : Long
+    scene : String
+    action : String
+    entityType : String
+    entityId : Long
+    bizNo : String
+    fromStatus : Integer
+    toStatus : Integer
+    result : Integer
+    operatorName : String
+    createTime : LocalDateTime
   }
 }
 
@@ -268,9 +265,9 @@ Student "1" <-- "0..*" DeliveryTask
 DeliveryTask "1" --> "0..*" DeliveryRecord
 Product "1" <-- "0..*" DeliveryRecord
 Student "1" <-- "0..*" NutritionIntake
-Student "1" <-- "0..*" SubscriptionPlan
-MealPackage "1" <-- "0..*" SubscriptionPlan
-OrderInfo "1" <-- "0..*" SubscriptionPlan
 DailyQuotaUsage "0..*" --> "1" OrderInfo : 配额台账
+' 过程迁移台账按 entityType + entityId 关联各类迁移主体（多态关联，不画固定外键）
+ProcessTransitionLog ..> OrderInfo : 记录迁移
+ProcessTransitionLog ..> DeliveryTask : 记录迁移
 
 @enduml

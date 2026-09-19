@@ -98,7 +98,7 @@ INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark
 (DATE_ADD(CURDATE(), INTERVAL 7 DAY), 2, 30, 0, '机动配额示例');
 
 -- ============================================================
--- 系统参数配置（支付一致性 / 订阅边界，管理端可在线修改）
+-- 系统参数配置（支付一致性 / 过程对账，管理端可在线修改）
 -- ============================================================
 INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order.pay.timeout.minutes', '15', '待支付订单超时自动取消阈值（分钟）；超时后先查单对账兜底再取消'),
@@ -109,7 +109,6 @@ INSERT INTO sys_config (config_key, config_value, description) VALUES
 -- 状态迁移规则种子（默认规则 = 现行硬编码行为；管理端可在线调整）
 -- 场景：ORDER 订单（1待支付 2已支付 3配送中 4已完成 5已退订）
 --      DELIVERY_TASK 配送任务（1待配送 2配送中 3已完成 4已取消）
---      SUBSCRIPTION_PLAN 续订计划（0已关闭 1已开启 2已暂停）
 -- ============================================================
 INSERT INTO state_transition_rule (scene, action, from_status, allowed, description) VALUES
 -- 订单
@@ -148,20 +147,7 @@ INSERT INTO state_transition_rule (scene, action, from_status, allowed, descript
 ('DELIVERY_TASK', 'REJECT', 3, 0, '已完成任务禁止改为拒收（禁止状态回退）'),
 ('DELIVERY_TASK', 'STOCKOUT_CANCEL', 1, 1, '配送前缺货仅可取消待配送任务（单期子订单取消）'),
 ('DELIVERY_TASK', 'STOCKOUT_CANCEL', 2, 0, '配送中任务不可缺货自动取消'),
-('DELIVERY_TASK', 'STOCKOUT_CANCEL', 3, 0, '已完成任务禁止缺货取消（禁止状态回退）'),
--- 续订计划
-('SUBSCRIPTION_PLAN', 'RENEW', 1, 1, '已开启计划允许续订'),
-('SUBSCRIPTION_PLAN', 'RENEW', 2, 0, '已暂停计划禁止续订（暂停期间不扣款）'),
-('SUBSCRIPTION_PLAN', 'RENEW', 0, 0, '已关闭计划禁止续订'),
-('SUBSCRIPTION_PLAN', 'PAUSE', 1, 1, '已开启计划允许暂停'),
-('SUBSCRIPTION_PLAN', 'PAUSE', 2, 0, '已暂停计划禁止重复暂停'),
-('SUBSCRIPTION_PLAN', 'PAUSE', 0, 0, '已关闭计划无需暂停'),
-('SUBSCRIPTION_PLAN', 'RESUME', 2, 1, '已暂停计划允许恢复（续订时间顺延）'),
-('SUBSCRIPTION_PLAN', 'RESUME', 1, 0, '已开启计划无需恢复'),
-('SUBSCRIPTION_PLAN', 'RESUME', 0, 0, '已关闭计划不可恢复（需重新开启）'),
-('SUBSCRIPTION_PLAN', 'CLOSE', 1, 1, '已开启计划允许关闭（终止订阅）'),
-('SUBSCRIPTION_PLAN', 'CLOSE', 2, 1, '已暂停计划允许关闭（终止订阅）'),
-('SUBSCRIPTION_PLAN', 'CLOSE', 0, 0, '已关闭计划禁止重复关闭');
+('DELIVERY_TASK', 'STOCKOUT_CANCEL', 3, 0, '已完成任务禁止缺货取消（禁止状态回退）');
 
 -- ============================================================
 -- 测试营养成分数据

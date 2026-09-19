@@ -19,7 +19,7 @@ public class ProcessTransitionLog {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 状态机场景，如 ORDER / DELIVERY_TASK / SUBSCRIPTION_PLAN */
+    /** 状态机场景，如 ORDER / DELIVERY_TASK / DELIVERY_RECORD */
     private String scene;
 
     /** 动作编码，如 PAY / SIGN / RENEW */

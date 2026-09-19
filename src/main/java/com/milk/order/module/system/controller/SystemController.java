@@ -11,8 +11,10 @@ import com.milk.order.module.system.entity.SysConfig;
 import com.milk.order.module.system.service.StateMachineService;
 import com.milk.order.module.system.service.SysConfigService;
 import com.milk.order.module.system.service.OperationLogService;
+import com.milk.order.module.system.service.ProcessTransitionLogService;
 import com.milk.order.module.user.entity.SysRole;
 import com.milk.order.module.user.service.SysRoleService;
+import com.milk.order.process.ProcessTransitionLog;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -26,8 +28,9 @@ import java.util.List;
  * 接口清单：
  * - GET /api/system/role/list        角色列表
  * - GET /api/system/log/list         操作日志分页
- * - GET /api/system/state-rule/list  状态迁移规则列表（?scene=ORDER/DELIVERY_TASK/SUBSCRIPTION_PLAN）
+ * - GET /api/system/state-rule/list  状态迁移规则列表（?scene=ORDER/DELIVERY_TASK）
  * - PUT /api/system/state-rule       修改状态迁移规则（allowed 0/1，在线生效）
+ * - GET /api/system/transition-log/list 过程迁移台账分页（只读，过程回放与问题回溯）
  * - GET /api/system/config/list      系统参数列表（支付超时/对账开关等）
  * - PUT /api/system/config           修改系统参数（在线生效）
  */
@@ -39,6 +42,7 @@ public class SystemController {
     private final SysRoleService sysRoleService;
     private final OperationLogService operationLogService;
     private final StateMachineService stateMachineService;
+    private final ProcessTransitionLogService processTransitionLogService;
     private final SysConfigService sysConfigService;
 
     @GetMapping("/role/list")
@@ -60,6 +64,28 @@ public class SystemController {
     public ApiResponse<Void> updateStateRule(@Valid @RequestBody StateRuleUpdateRequest request) {
         stateMachineService.updateRule(request.getId(), request.getAllowed(), request.getDescription());
         return ApiResponse.success();
+    }
+
+    // ==================== 过程迁移台账（状态迁移留痕，只读） ====================
+
+    /**
+     * 过程迁移台账分页：每次状态迁移由过程层写入一行（成功与 CAS 冲突都记录），
+     * 用于过程回放、问题回溯与父子状态对账取证。只读，不提供修改与删除。
+     */
+    @GetMapping("/transition-log/list")
+    public ApiResponse<PageResult<ProcessTransitionLog>> transitionLogList(
+            @RequestParam(defaultValue = "1") Long pageNum,
+            @RequestParam(defaultValue = "10") Long pageSize,
+            @RequestParam(required = false) String scene,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String entityType,
+            @RequestParam(required = false) String bizNo,
+            @RequestParam(required = false) Integer result,
+            @RequestParam(required = false) String startTime,
+            @RequestParam(required = false) String endTime) {
+        IPage<ProcessTransitionLog> page = processTransitionLogService.pageLogs(
+                pageNum, pageSize, scene, action, entityType, bizNo, result, startTime, endTime);
+        return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
     }
 
     // ==================== 系统参数（管理端在线配置） ====================

@@ -22,7 +22,7 @@ import java.util.List;
  * - GET    /api/order/{id}           订单详情（含明细）
  * - POST   /api/order                 创建订单（待支付，不扣库存）
  * - POST   /api/order/prepay/{id}    微信支付预下单（模拟）：返回调起支付凭证，支付结果经微信异步回调更新
- * - POST   /api/order/pay/{id}       模拟支付（同步：写支付记录+改已支付+扣库存），供管理端与续订内部流程
+ * - POST   /api/order/pay/{id}       模拟支付（Web 管理端入口：抢占状态+扣配额+写流水+展开任务）
  * - PUT    /api/order/cancel/{id}    退订（仅未开始配送可退；开始配送由配送任务联动触发退款闸门）
  * - PUT    /api/order/complete/{id}  完成订单（配送中→已完成）
  * - GET    /api/order/{id}/items     订单明细

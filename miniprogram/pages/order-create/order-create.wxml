@@ -34,7 +34,7 @@
       </view>
       <view class="row">
         <text class="row-label">配送周期</text>
-        <text class="row-value text-muted">{{package && package.packageType === 2 ? '本学期一次性订购（约5个月），不支持自动续订' : '固定一个月，支持自动续订'}}（周期内每日配送）</text>
+        <text class="row-value text-muted">{{package && package.packageType === 2 ? '本学期一次性订购（约5个月）' : '固定一个月'}}（周期内每日配送，一次性购买）</text>
       </view>
     </block>
   </view>

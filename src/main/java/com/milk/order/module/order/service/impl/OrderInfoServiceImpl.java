@@ -149,7 +149,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     public List<OrderItem> getOrderItems(Long orderId) {
         OrderInfo order = getById(orderId);
         if (order != null) {
-            // 家长/班主任按数据范围校验归属（内部流程如续订无登录上下文时自动跳过）
+            // 家长/班主任按数据范围校验归属（内部调用如定时任务无登录上下文时自动跳过）
             checkOrderAccess(order);
         }
         return orderItemMapper.selectList(
@@ -159,6 +159,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     // ==================== 创建订单 ====================
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public Long createOrder(CreateOrderRequest request) {
         // 数据权限：家长仅能为自己绑定的学生下单，班主任仅能为本班学生下单
         checkCreateOrderScope(request);
@@ -166,10 +167,13 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     }
 
     /**
-     * 内部创建订单（支持指定下单人，供定时任务/续订等无登录上下文场景调用）
+     * 创建订单（订单头与明细必须原子写入）。
+     *
+     * <p>保持私有：只由 {@link #createOrder} 在事务内调用。此前它是 public 且被同类内部直调，
+     * Spring 代理被绕过、方法上的 {@code @Transactional} 实际不生效，订单头与明细会分两个事务写入
+     * ——失败时留下「订单存在但明细不完整」的半截数据。事务边界上移到 createOrder。</p>
      */
-    @Transactional(rollbackFor = Exception.class)
-    public Long doCreateOrder(CreateOrderRequest request, Long userId) {
+    private Long doCreateOrder(CreateOrderRequest request, Long userId) {
         // 1. 校验学生与班级
         Student student = studentMapper.selectById(request.getStudentId());
         if (student == null) {
@@ -266,7 +270,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             discountAmount = BigDecimal.ZERO;
         }
 
-        // 5. 下单人（由调用方传入，管理端代下单用当前登录用户，续订用原订单家长）
+        // 5. 下单人（由调用方传入：Web 管理端/家长自助下单均为当前登录用户）
 
         // 6. 生成订单号
         String orderNo = nextNo("MO");
@@ -305,50 +309,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
         return order.getId();
     }
 
-    // ==================== 续订订单 ====================
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public Long renewOrder(Long originalOrderId) {
-        OrderInfo original = getOrder(originalOrderId);
-        Integer status = original.getStatus();
-        if (!OrderStatus.PAID.getCode().equals(status)
-                && !OrderStatus.DELIVERING.getCode().equals(status)
-                && !OrderStatus.COMPLETED.getCode().equals(status)) {
-            throw new BusinessException("仅已支付/配送中/已完成订单可续订");
-        }
-        // 复制明细
-        List<OrderItem> originalItems = getOrderItems(originalOrderId);
-        if (originalItems.isEmpty()) {
-            throw new BusinessException("原订单无明细，无法续订");
-        }
-        List<OrderItemRequest> items = originalItems.stream().map(oi -> {
-            OrderItemRequest req = new OrderItemRequest();
-            req.setProductId(oi.getProductId());
-            req.setQuantity(oi.getQuantity());
-            return req;
-        }).collect(Collectors.toList());
-
-        // 新配送周期：从原订单结束日+1天开始，按月续订加1个月
-        LocalDate newStart = original.getDeliveryEndDate().plusDays(1);
-        LocalDate newEnd = newStart.plusMonths(1).minusDays(1);
-
-        CreateOrderRequest request = new CreateOrderRequest();
-        request.setStudentId(original.getStudentId());
-        request.setPackageId(original.getPackageId());
-        request.setDeliveryStartDate(newStart);
-        request.setDeliveryEndDate(newEnd);
-        request.setItems(items);
-        request.setRemark("自动续订订单（原订单" + original.getOrderNo() + "）");
-
-        // 创建新订单（下单人沿用原订单家长）
-        Long newOrderId = doCreateOrder(request, original.getUserId());
-        // 自动支付（续订默认已支付）
-        payOrder(newOrderId);
-        return newOrderId;
-    }
-
-    // ==================== 模拟支付（管理端/内部流程，同步完成） ====================
+    // ==================== 模拟支付（Web 管理端，同步完成） ====================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -892,7 +853,7 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     /**
      * 校验当前用户是否有权访问该订单：
      * 家长仅能访问自己绑定学生的订单，班主任仅能访问本班订单；
-     * 管理员与无登录上下文的内部流程（定时续订等）不限制。
+     * 管理员与无登录上下文的内部流程（定时兜底、对账补偿等）不限制。
      */
     private void checkOrderAccess(OrderInfo order) {
         DataScope scope = dataScopeResolver.resolveQuietly();

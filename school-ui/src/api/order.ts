@@ -37,8 +37,3 @@ export function cancelOrder(id: number, reason?: string) {
 export function completeOrder(id: number) {
   return put(`/order/complete/${id}`)
 }
-
-/** 订单明细 */
-export function getOrderItems(id: number) {
-  return get(`/order/${id}/items`)
-}

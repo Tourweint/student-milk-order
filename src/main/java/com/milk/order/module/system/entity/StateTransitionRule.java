@@ -13,7 +13,7 @@ import lombok.EqualsAndHashCode;
 @TableName("state_transition_rule")
 public class StateTransitionRule extends BaseEntity {
 
-    /** 状态机场景：ORDER-订单，DELIVERY_TASK-配送任务，SUBSCRIPTION_PLAN-续订计划 */
+    /** 状态机场景：ORDER-订单，DELIVERY_TASK-配送任务 */
     private String scene;
 
     /** 动作编码（见 StateTransitions） */

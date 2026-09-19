@@ -28,14 +28,9 @@ export function getDailyTaskSummary(deliveryDate: string) {
   return get('/delivery/task/summary', { deliveryDate })
 }
 
-/** 配送前缺货批量取消：取消某日期某奶品的全部待配送任务（配额按日回补，不影响主订阅） */
+/** 配送前缺货批量取消：取消某日期某奶品的全部待配送任务（仅取消该期，配额按台账回补） */
 export function stockoutCancelTasks(data: { deliveryDate: string; productId: number; reason?: string }) {
   return put('/delivery/task/stockout-cancel', data)
-}
-
-/** 配送任务详情 */
-export function getDeliveryTaskById(id: number) {
-  return get(`/delivery/task/${id}`)
 }
 
 /** 开始配送 */

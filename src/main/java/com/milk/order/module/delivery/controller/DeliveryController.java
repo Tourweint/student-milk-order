@@ -86,7 +86,7 @@ public class DeliveryController {
         return ApiResponse.success(deliveryTaskService.dailySummary(deliveryDate));
     }
 
-    /** 配送前缺货批量取消：取消某日期某奶品全部待配送任务（单期子订单取消，不影响主订阅与已完成任务） */
+    /** 配送前缺货批量取消：取消某日期某奶品全部待配送任务（仅取消该期，不影响已完成任务） */
     @PutMapping("/task/stockout-cancel")
     public ApiResponse<Integer> stockoutCancel(@Valid @RequestBody StockoutCancelRequest request) {
         int count = deliveryTaskService.stockoutCancel(request);

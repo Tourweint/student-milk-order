@@ -53,7 +53,7 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     /**
      * 配送前缺货批量取消：取消某配送日期某奶品的全部「待配送」任务（单期子订单取消）。
      * 已完成/配送中任务不受影响（禁止回退）；关联零散订单当日配额按台账回补；
-     * 不影响主订阅计划（下期续订照常）；订单任务全部终态时自动完成。返回取消任务数。
+     * 不影响该订单其他期次；订单任务全部终态时自动完成。返回取消任务数。
      */
     int stockoutCancel(StockoutCancelRequest request);
 

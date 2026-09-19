@@ -23,10 +23,7 @@ public interface OrderInfoService extends IService<OrderInfo> {
     /** 创建订单（生成订单号、计算金额、保存明细，状态为待支付，不扣库存） */
     Long createOrder(CreateOrderRequest request);
 
-    /** 续订订单：复制原订单明细，生成新配送周期的订单并自动支付，返回新订单ID */
-    Long renewOrder(Long originalOrderId);
-
-    /** 模拟支付（同事务：写支付记录 + 订单改已支付 + 扣减库存），供管理端与续订内部流程使用 */
+    /** 模拟支付（同事务：抢占订单状态 + 扣减配额 + 写支付流水 + 展开配送任务），供 Web 管理端支付入口使用 */
     void payOrder(Long id);
 
     /** 发起微信支付（模拟）：作废旧待支付流水、生成预支付单与前端调起参数，写入待支付流水 */
