@@ -65,6 +65,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '配送管理', icon: 'Van', roles: ['ADMIN', 'TEACHER'] }
       },
       {
+        path: 'delivery-calendar',
+        name: 'DeliveryCalendar',
+        component: () => import('@/views/delivery/DeliveryCalendar.vue'),
+        meta: { title: '配送日历', icon: 'Calendar', roles: ['ADMIN'] }
+      },
+      {
         path: 'nutrition',
         name: 'NutritionStats',
         component: () => import('@/views/nutrition/NutritionStats.vue'),

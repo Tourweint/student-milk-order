@@ -5,6 +5,7 @@ import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
 import com.milk.order.module.delivery.dto.BatchSignRequest;
 import com.milk.order.module.delivery.dto.BatchStartRequest;
+import com.milk.order.module.delivery.dto.CalendarRebalanceRequest;
 import com.milk.order.module.delivery.dto.RebalanceRequest;
 import com.milk.order.module.delivery.dto.ShiftTasksRequest;
 import com.milk.order.module.delivery.dto.SignRequest;
@@ -32,6 +33,7 @@ import java.util.List;
  * - PUT    /api/delivery/task/start/{id}    开始配送（待配送→配送中，记录派送人/时间并联动订单）
  * - PUT    /api/delivery/task/batch-start   今日已送出：按日期批量开始配送（幂等，退款闸门联动；ADMIN/DELIVERY）
  * - POST   /api/delivery/task/shift         配送日平移（仅管理员；两级预检 + 合并/新建到目标日）
+ * - POST   /api/delivery/task/calendar-rebalance 配送日历重排（仅管理员；周末停送 + 停送日并入前一个工作日）
  * - POST   /api/delivery/task/rebalance     学期末摊平（仅管理员；按截止日重排待配送任务数量）
  * - GET    /api/delivery/task/summary       某配送日期按班级汇总（配送站面板今日概览）
  * - GET    /api/delivery/task/pending-quantity 家长端首页：绑定学生的剩余待配送盒数（待配送+配送中）
@@ -94,6 +96,16 @@ public class DeliveryController {
     @PostMapping("/task/shift")
     public ApiResponse<ShiftResultVO> shiftTasks(@Valid @RequestBody ShiftTasksRequest request) {
         return ApiResponse.success(deliveryTaskService.shiftTasksToDate(request.getTaskIds(), request.getTargetDate()));
+    }
+
+    /**
+     * 配送日历重排（仅管理员）：把范围内落在周末（非补课日）/停送日的待配送任务，
+     * 按规则并入前面的工作日（周六/周日各提前 2 天、停送日并入前一个有效配送日）。
+     * 需先开启系统参数 delivery.weekend.stop；超单日上限时继续向前找未满的工作日。
+     */
+    @PostMapping("/task/calendar-rebalance")
+    public ApiResponse<ShiftResultVO> calendarRebalance(@Valid @RequestBody CalendarRebalanceRequest request) {
+        return ApiResponse.success(deliveryTaskService.calendarRebalance(request.getStartDate(), request.getEndDate()));
     }
 
     /** 学期末摊平（仅管理员）：按截止日把订单剩余量重排到 [今天, 截止日] 的待配送任务上（可重复执行，幂等） */

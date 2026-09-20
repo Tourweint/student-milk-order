@@ -50,7 +50,7 @@ src/main/java/com/milk/order/
 src/main/resources/
   application.yml
   sql/schema.sql, sql/data.sql
-src/test/java/com/milk/order/experiment/   # 并发/幂等/异常恢复实验（实验一~八）
+src/test/java/com/milk/order/experiment/   # 并发/幂等/异常恢复实验（实验一~十三）
 src/test/java/com/milk/order/contract/     # 状态机契约矩阵测试（规则覆盖/安全禁止/台账可回放）
 src/test/resources/application-test.yml    # 实验专用配置（独立实验库、关闭定时任务）
 school-ui/src/
@@ -116,6 +116,11 @@ school-ui/src/
   原任务作废走 CAS（幂等闸门），合并/加量的条件更新影响 0 行必须抛异常回滚，不能静默跳过。
   补送按订单类型分叉（套餐合并 `quantity`、零散新建 + 追加配额），
   且 `completeOrderIfAllTasksDone` **必须放在补送落库之后**。机制细节见 `docs/基线文档/可靠性设计.md` §十三。
+- **周末停送 / 调休例外（配送日历重排）**：`delivery_exception` 是**唯一权威**，系统**不做**官方节假日自动推算；
+  `delivery.weekend.stop=false`（默认）时重排**必须拒绝执行**，不得改动现状行为。重排与平移共用同一套落账骨架
+  （`relocateTask`：CAS 作废 → 合并/新建 → 同步签收记录 → 父过程自愈待办），**不要再写第二套落账逻辑**；
+  同样**不得更新 `deliveryEndDate`**，盒数与任务数必须守恒。顺序硬约束：**先例外维护 → 再日历重排 → 最后期末摊平**；
+  单日合并上限 3 盒，超限继续向前找未满的有效工作日。方案与实测见 `docs/基线文档/周末停送与调休例外-方案.md` §11。
 - 订单头与明细等「一次业务动作写入多张表」的场景，事务边界必须落在**外部调用入口**（public 方法且经
   Spring 代理），不要依赖同类内部直调的 `@Transactional`（自调用不经过代理，注解形同虚设）。
 - 密码必须 BCrypt 存储；数据权限在 Service 层落实：家长仅看自己的孩子，班主任仅看本班，管理员可查看全部。
@@ -151,7 +156,7 @@ school-ui/src/
 ```powershell
 # 后端（仓库根目录）
 mvn clean compile
-mvn test                       # 含 12 组并发/幂等/异常恢复/多实例/混沌/长稳/性能实验 + 契约矩阵测试（需先准备实验库）
+mvn test                       # 含 13 组并发/幂等/异常恢复/多实例/混沌/长稳/性能/平移补送实验 + 契约矩阵测试（需先准备实验库）
 mvn spring-boot:run
 
 # 前端

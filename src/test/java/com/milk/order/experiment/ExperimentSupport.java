@@ -57,7 +57,7 @@ public abstract class ExperimentSupport {
 
     /** 实验结束后需要清空的业务表（保留 state_transition_rule / sys_config / process_reconcile_rule 种子数据） */
     private static final List<String> CLEAN_TABLES = List.of(
-            "nutrition_intake", "delivery_record", "delivery_task",
+            "nutrition_intake", "delivery_compensation", "delivery_exception", "delivery_record", "delivery_task",
             "daily_quota_usage", "daily_quota", "payment_record",
             "order_item", "order_info", "process_transition_log",
             "process_pending_task", "process_invariant_violation", "wechat_pay_order",
@@ -195,6 +195,59 @@ public abstract class ExperimentSupport {
         request.setRecordId(recordId);
         request.setSignPerson("实验签收");
         deliveryTaskService.signRecord(request);
+    }
+
+    /**
+     * 构造一个「已支付」订单（含明细）并展开整期任务。
+     *
+     * <p>用于只需要"已支付 + 已有任务"的配送链实验，避免再走支付入口（那会牵入配额与流水）。</p>
+     *
+     * @param packageId 非空表示学期套餐（`order_type=2`，不占机动配额）；为空表示单日零散订购
+     */
+    protected long newPaidOrder(LocalDate start, LocalDate end, int quantity, Long packageId) {
+        String orderNo = TAG + "-P" + ORDER_SEQ.getAndIncrement();
+        long days = end.toEpochDay() - start.toEpochDay() + 1;
+        BigDecimal amount = UNIT_PRICE.multiply(BigDecimal.valueOf(quantity)).multiply(BigDecimal.valueOf(days));
+        jdbcTemplate.update("INSERT INTO order_info (order_no, student_id, user_id, class_id, package_id, order_type, status, "
+                        + "total_amount, pay_amount, discount_amount, delivery_start_date, delivery_end_date, remark, deleted) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, 2, ?, ?, 0, ?, ?, ?, 0)",
+                orderNo, studentId, PARENT_USER_ID, classId, packageId, packageId == null ? 1 : 2,
+                amount, amount, start, end, TAG);
+        long orderId = id("SELECT id FROM order_info WHERE order_no = ?", orderNo);
+        jdbcTemplate.update("INSERT INTO order_item (order_id, product_id, product_name, spec, price, quantity, subtotal, deleted) "
+                        + "VALUES (?, ?, ?, '250ml', ?, ?, ?, 0)",
+                orderId, productId, TAG + "奶", UNIT_PRICE, quantity,
+                UNIT_PRICE.multiply(BigDecimal.valueOf(quantity)));
+        deliveryTaskService.generateTasksForOrder(orderInfoService.getById(orderId));
+        return orderId;
+    }
+
+    /** 走业务拒收入口拒收一条已送出记录（含自动补送），返回原任务 ID 便于断言 */
+    protected void rejectRecord(long recordId, String reasonCode, String reasonDetail) {
+        deliveryTaskService.rejectRecord(recordId, reasonCode, reasonDetail, null);
+    }
+
+    /** 某订单某配送日任务的数量（不存在返回 -1） */
+    protected int taskQuantity(long orderId, LocalDate deliveryDate) {
+        Integer value = jdbcTemplate.queryForObject(
+                "SELECT quantity FROM delivery_task WHERE order_id = ? AND delivery_date = ?",
+                Integer.class, orderId, deliveryDate);
+        return value == null ? -1 : value;
+    }
+
+    /** 某订单某配送日任务的状态（不存在返回 -1） */
+    protected int taskStatus(long orderId, LocalDate deliveryDate) {
+        Integer value = jdbcTemplate.queryForObject(
+                "SELECT status FROM delivery_task WHERE order_id = ? AND delivery_date = ?",
+                Integer.class, orderId, deliveryDate);
+        return value == null ? -1 : value;
+    }
+
+    /** 补偿台账条数；sourceTaskId 为 null 时统计全表 */
+    protected int compensationCount(Long sourceTaskId) {
+        return sourceTaskId == null
+                ? count("SELECT COUNT(*) FROM delivery_compensation")
+                : count("SELECT COUNT(*) FROM delivery_compensation WHERE source_task_id = ?", sourceTaskId);
     }
 
     /** 启用/停用一条补偿规则（按规则名），用于验证“补偿由规则表驱动” */

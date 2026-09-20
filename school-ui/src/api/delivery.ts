@@ -44,6 +44,37 @@ export function rebalanceDeliveryQuantities(data: { orderId: number; deadline: s
   return post('/delivery/task/rebalance', data)
 }
 
+/**
+ * 配送日历重排（仅管理员）：把日期范围内落在周末（非补课日）/停送日的待配送任务，
+ * 按规则并入前面的工作日（周六、周日各提前 2 天；停送日并入前一个有效配送日）。
+ * 需先开启系统参数 delivery.weekend.stop。
+ */
+export function calendarRebalanceTasks(data: { startDate: string; endDate: string }) {
+  return post('/delivery/task/calendar-rebalance', data)
+}
+
+// ==================== 配送例外（停送日/补课日，仅管理员） ====================
+
+/** 配送例外列表（可按日期范围） */
+export function getDeliveryExceptionList(params?: { startDate?: string; endDate?: string }) {
+  return get('/delivery/exception/list', params)
+}
+
+/** 新增/修改配送例外（日期唯一；type：1-停送，2-补送/补课） */
+export function saveDeliveryException(data: {
+  id?: number
+  exceptionDate: string
+  type: number
+  remark?: string
+}) {
+  return post('/delivery/exception/save', data)
+}
+
+/** 删除配送例外 */
+export function deleteDeliveryException(id: number) {
+  return post('/delivery/exception/delete', { id })
+}
+
 /** 配送前缺货批量取消：取消某日期某奶品的全部待配送任务（仅取消该期，配额按台账回补） */
 export function stockoutCancelTasks(data: { deliveryDate: string; productId: number; reason?: string }) {
   return put('/delivery/task/stockout-cancel', data)

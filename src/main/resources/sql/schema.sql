@@ -373,6 +373,22 @@ CREATE TABLE IF NOT EXISTS delivery_compensation (
     KEY idx_target_task (target_task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拒收补送补偿台账';
 
+-- 配送例外表（周末停送与调休例外，管理员手动维护）
+-- 只描述「与日历默认规则不同」的日期，不推算官方节假日（官方调休每年发布、各地不同）：
+--   type=1 停送：默认要送但不送 → 该日任务并入前一个有效配送日；
+--   type=2 补送/补课：默认不送但要送（周末调休上课）→ 该日保留任务、正常配送。
+-- 日期唯一；配合 sys_config 的 delivery.weekend.stop 开关生效。
+CREATE TABLE IF NOT EXISTS delivery_exception (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '例外ID',
+    exception_date DATE NOT NULL COMMENT '例外日期',
+    type TINYINT NOT NULL COMMENT '类型：1-停送（默认要送但不送），2-补送（默认不送但要送）',
+    remark VARCHAR(255) COMMENT '备注（如"五一调休""6/13 补课"）',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_exception_date (exception_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='配送例外表（停送日/补课日，管理员维护）';
+
 -- ============================================================
 -- 6. 营养统计模块
 -- ============================================================

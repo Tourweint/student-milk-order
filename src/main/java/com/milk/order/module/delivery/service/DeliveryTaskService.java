@@ -122,6 +122,22 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     ShiftResultVO shiftTasksToDate(List<Long> taskIds, String targetDate);
 
     /**
+     * 配送日历重排（周末停送 + 停送日并入，仅管理员）：
+     * 把 [startDate, endDate] 范围内落在「周末（且非补课日）」或「停送日」的待配送任务，
+     * 按规则并到前面的工作日（周六/周日各提前 2 天；停送日并入前一个有效配送日）。
+     *
+     * <p>前提是 `sys_config.delivery.weekend.stop=true`，否则拒绝执行（不改动现状行为）。
+     * 例外表（delivery_exception）是唯一权威：type=1 停送、type=2 补课（当天照常配送）。
+     * 合并后单任务超 3 盒时继续向前找未满的工作日；找不到则跳过并计入 messages。</p>
+     *
+     * <p>幂等：源任务 CAS 作废（1→4）后不再是「待配送」，重复执行不会重复加量；
+     * 盒数与任务数守恒（作废 1 条 + 合并/新建 1 条），**不更新订单 deliveryEndDate**。</p>
+     *
+     * @return 重排结果统计（复用平移结果结构）
+     */
+    ShiftResultVO calendarRebalance(String startDate, String endDate);
+
+    /**
      * 学期末摊平：把订单在 [今天, 截止日] 天内 status=1 的任务按剩余量重新分配（可重复执行，幂等）。
      *
      * <p>重置基准 = 1 + 该任务补送量（从 delivery_compensation 汇总），避免抹掉拒收补送；

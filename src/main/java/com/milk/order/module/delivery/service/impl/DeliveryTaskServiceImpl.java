@@ -17,9 +17,11 @@ import com.milk.order.module.clazz.mapper.StudentMapper;
 import com.milk.order.module.delivery.dto.SignRequest;
 import com.milk.order.module.delivery.dto.StockoutCancelRequest;
 import com.milk.order.module.delivery.entity.DeliveryCompensation;
+import com.milk.order.module.delivery.entity.DeliveryException;
 import com.milk.order.module.delivery.entity.DeliveryRecord;
 import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.mapper.DeliveryCompensationMapper;
+import com.milk.order.module.delivery.mapper.DeliveryExceptionMapper;
 import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
 import com.milk.order.module.delivery.mapper.DeliveryTaskMapper;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
@@ -31,6 +33,7 @@ import com.milk.order.module.delivery.vo.PendingSignVO;
 import com.milk.order.module.delivery.vo.ShiftResultVO;
 
 import com.milk.order.module.product.service.DailyQuotaService;
+import com.milk.order.module.system.service.SysConfigService;
 import com.milk.order.module.nutrition.entity.NutritionInfo;
 import com.milk.order.module.nutrition.entity.NutritionIntake;
 import com.milk.order.module.nutrition.mapper.NutritionInfoMapper;
@@ -57,6 +60,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -85,6 +89,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final DailyQuotaService dailyQuotaService;
     private final ProcessPendingTaskService pendingTaskService;
     private final DeliveryCompensationMapper deliveryCompensationMapper;
+    private final DeliveryExceptionMapper deliveryExceptionMapper;
+    private final SysConfigService sysConfigService;
 
     /**
      * 任务开始配送联动订单状态（已支付→配送中）须经 OrderInfoService 统一状态机出口；
@@ -96,6 +102,24 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
 
     private static final DateTimeFormatter NO_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final Pattern ML_PATTERN = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*ml", Pattern.CASE_INSENSITIVE);
+
+    /** 「周末停送」开关配置键（sys_config，管理端可在线修改） */
+    private static final String CONFIG_WEEKEND_STOP = "delivery.weekend.stop";
+
+    /** 单任务单日合并上限（与期末摊平保持一致：每天最多 3 盒） */
+    private static final int MAX_DAILY_TASK_QUANTITY = 3;
+
+    /** 日历重排向前回溯的最大天数（无解时防止无限向前找；同时限定例外表加载范围） */
+    private static final int CALENDAR_MAX_LOOKBACK_DAYS = 30;
+
+    /** {@link #relocateTask} 返回码：CAS 失败，源任务已被并发处理 */
+    private static final int RELOCATE_SKIPPED = 0;
+
+    /** {@link #relocateTask} 返回码：合并到目标日已有任务 */
+    private static final int RELOCATE_MERGED = 1;
+
+    /** {@link #relocateTask} 返回码：在目标日新建任务 */
+    private static final int RELOCATE_CREATED = 2;
 
     /**
      * 任务号：由**业务键**确定性推导（订单 × 品种 × 配送日），而不是「时间戳 + JVM 内自增序列」。
@@ -1051,79 +1075,286 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         }
         // 逐条处理：CAS 作废原任务（幂等闸门）→ 合并/新建到目标日
         for (DeliveryTask t : pending) {
-            boolean cancelled = processTransitionExecutor.attempt(
-                    TransitionSpec.builder()
-                            .scene(StateTransitions.SCENE_DELIVERY_TASK)
-                            .action(StateTransitions.ACTION_TASK_CANCEL)
-                            .sceneText("配送任务")
-                            .entityType("delivery_task")
-                            .entityId(t.getId())
-                            .bizNo(t.getTaskNo())
-                            .fromStatus(1)
-                            .toStatus(4)
-                            .remark("配送日平移至 " + target)
-                            .build(),
-                    () -> lambdaUpdate()
-                            .eq(DeliveryTask::getId, t.getId())
-                            .eq(DeliveryTask::getStatus, 1)
-                            .set(DeliveryTask::getStatus, 4)
-                            .set(DeliveryTask::getRemark, "配送日平移至 " + target)
-                            .update());
-            if (!cancelled) {
+            int code = relocateTask(t, target, "配送日平移至 " + target, "已平移至 " + target, targetMap);
+            if (code == RELOCATE_SKIPPED) {
                 result.setSkipped(result.getSkipped() + 1);
                 result.getMessages().add(t.getTaskNo() + " 已被并发处理，跳过");
-                continue;
-            }
-            // 原记录不置拒收（平移不是拒收），仅标注 remark，保持未签收
-            deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
-                    .eq(DeliveryRecord::getTaskId, t.getId())
-                    .eq(DeliveryRecord::getSignStatus, 2)
-                    .set(DeliveryRecord::getRemark, "已平移至 " + target));
-
-            int qty = t.getQuantity() == null ? 1 : t.getQuantity();
-            DeliveryTask exist = targetMap.get(t.getOrderId() + "#" + t.getProductId());
-            if (exist != null) {
-                boolean updated = lambdaUpdate()
-                        .eq(DeliveryTask::getId, exist.getId())
-                        .eq(DeliveryTask::getStatus, 1)
-                        .setSql("quantity = quantity + " + qty)
-                        .update();
-                if (!updated) {
-                    throw new BusinessException(exist.getTaskNo() + " 已开始配送，平移失败，请改选目标日");
-                }
-                deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
-                        .eq(DeliveryRecord::getTaskId, exist.getId())
-                        .setSql("quantity = quantity + " + qty));
+            } else if (code == RELOCATE_MERGED) {
                 result.setMerged(result.getMerged() + 1);
+                result.setShifted(result.getShifted() + 1);
             } else {
-                OrderInfo order = orderInfoMapper.selectById(t.getOrderId());
-                if (order == null) {
-                    throw new BusinessException("订单不存在，无法平移 " + t.getTaskNo());
-                }
-                DeliveryTask created = createTaskReturning(order, t.getProductId(), qty, target);
-                if (created == null) {
-                    throw new BusinessException(t.getTaskNo() + " 平移失败：目标日已存在同键任务");
-                }
-                // 登记进 map：同订单同品种的后续源任务应合并到这条新任务，而不是重复新建
-                targetMap.put(t.getOrderId() + "#" + t.getProductId(), created);
                 result.setCreated(result.getCreated() + 1);
+                result.setShifted(result.getShifted() + 1);
             }
-            result.setShifted(result.getShifted() + 1);
-            enqueueOrderAggregation(t.getOrderId(), StateTransitions.ACTION_TASK_CANCEL);
         }
         return result;
     }
 
     /**
+     * 把一条待配送任务「作废并落到目标日」——平移与日历重排共用的落账骨架。
+     *
+     * <p>顺序不可颠倒：先 CAS 抢占原任务状态（1→4，幂等闸门，落败即中止，不产生副作用），
+     * 再合并目标日同订单同品种任务（条件更新 status=1，加量）或新建（唯一键仲裁）。
+     * 目标日合并 0 行 / 新建撞键说明目标日任务已被并发处理，抛业务异常回滚。</p>
+     *
+     * @param source      源任务（调用方须确保其为待配送）
+     * @param target      目标配送日
+     * @param taskRemark  源任务备注（留痕）
+     * @param recordRemark 源任务签收记录备注
+     * @param targetMap   目标日 (orderId#productId → 任务) 映射；合并/新建结果会就地更新，
+     *                    使同一批次内后续同键源任务合并到同一条任务而非重复新建
+     * @return {@link #RELOCATE_SKIPPED} / {@link #RELOCATE_MERGED} / {@link #RELOCATE_CREATED}
+     */
+    private int relocateTask(DeliveryTask source, LocalDate target, String taskRemark, String recordRemark,
+                             Map<String, DeliveryTask> targetMap) {
+        boolean cancelled = processTransitionExecutor.attempt(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_DELIVERY_TASK)
+                        .action(StateTransitions.ACTION_TASK_CANCEL)
+                        .sceneText("配送任务")
+                        .entityType("delivery_task")
+                        .entityId(source.getId())
+                        .bizNo(source.getTaskNo())
+                        .fromStatus(1)
+                        .toStatus(4)
+                        .remark(taskRemark)
+                        .build(),
+                () -> lambdaUpdate()
+                        .eq(DeliveryTask::getId, source.getId())
+                        .eq(DeliveryTask::getStatus, 1)
+                        .set(DeliveryTask::getStatus, 4)
+                        .set(DeliveryTask::getRemark, taskRemark)
+                        .update());
+        if (!cancelled) {
+            return RELOCATE_SKIPPED;
+        }
+        // 原记录不置拒收（平移不是拒收），仅标注 remark，保持未签收
+        deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getTaskId, source.getId())
+                .eq(DeliveryRecord::getSignStatus, 2)
+                .set(DeliveryRecord::getRemark, recordRemark));
+
+        int qty = source.getQuantity() == null ? 1 : source.getQuantity();
+        String key = source.getOrderId() + "#" + source.getProductId();
+        DeliveryTask exist = targetMap.get(key);
+        if (exist != null) {
+            boolean updated = lambdaUpdate()
+                    .eq(DeliveryTask::getId, exist.getId())
+                    .eq(DeliveryTask::getStatus, 1)
+                    .setSql("quantity = quantity + " + qty)
+                    .update();
+            if (!updated) {
+                throw new BusinessException(exist.getTaskNo() + " 已开始配送，平移失败，请改选目标日");
+            }
+            deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                    .eq(DeliveryRecord::getTaskId, exist.getId())
+                    .setSql("quantity = quantity + " + qty));
+            // 同步缓存里的数量：同批次后续容量判断必须看到已并入的盒数
+            exist.setQuantity((exist.getQuantity() == null ? 0 : exist.getQuantity()) + qty);
+            enqueueOrderAggregation(source.getOrderId(), StateTransitions.ACTION_TASK_CANCEL);
+            return RELOCATE_MERGED;
+        }
+        OrderInfo order = orderInfoMapper.selectById(source.getOrderId());
+        if (order == null) {
+            throw new BusinessException("订单不存在，无法平移 " + source.getTaskNo());
+        }
+        DeliveryTask created = createTaskReturning(order, source.getProductId(), qty, target);
+        if (created == null) {
+            throw new BusinessException(source.getTaskNo() + " 平移失败：目标日已存在同键任务");
+        }
+        // 登记进 map：同订单同品种的后续源任务应合并到这条新任务，而不是重复新建
+        targetMap.put(key, created);
+        enqueueOrderAggregation(source.getOrderId(), StateTransitions.ACTION_TASK_CANCEL);
+        return RELOCATE_CREATED;
+    }
+
+    /**
+     * 配送日历重排（周末停送 + 停送日并入，见 `docs/基线文档/周末停送与调休例外-方案.md`）。
+     *
+     * <p>业务规则：① 周六/周日（且非补课日）各提前 2 天并入周四/周五；② 停送日并入前一个有效配送日；
+     * ③ 补课日（例外 type=2）照常配送、不重排；④ 目标日合并后超 3 盒则继续向前找未满的工作日；
+     * ⑤ 盒数与任务数守恒，不改订单金额/套餐盒数/deliveryEndDate。</p>
+     *
+     * <p>幂等与并发：源任务经 CAS 作废后不再是「待配送」，重复执行 `requested` 归零、不重复加量；
+     * 与签收/开始配送并发时由 CAS 与条件更新仲裁。多实例下无本地状态（例外表与任务表为准）。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ShiftResultVO calendarRebalance(String startDate, String endDate) {
+        LocalDate start = parseDate(startDate, "开始日期");
+        LocalDate end = parseDate(endDate, "结束日期");
+        if (end.isBefore(start)) {
+            throw new BusinessException("结束日期不能早于开始日期");
+        }
+        if (!sysConfigService.getBool(CONFIG_WEEKEND_STOP, false)) {
+            throw new BusinessException("「周末停送」未开启（系统参数 delivery.weekend.stop），"
+                    + "日历重排不生效；如确需重排请先开启该开关");
+        }
+        LocalDate today = LocalDate.now();
+        ShiftResultVO result = new ShiftResultVO();
+
+        // 例外表：加载 [start-回溯上限, end]，覆盖可能回退到的目标日
+        List<DeliveryException> exceptions = deliveryExceptionMapper.selectList(
+                new LambdaQueryWrapper<DeliveryException>()
+                        .ge(DeliveryException::getExceptionDate, start.minusDays(CALENDAR_MAX_LOOKBACK_DAYS))
+                        .le(DeliveryException::getExceptionDate, end));
+        Set<LocalDate> stopDays = new HashSet<>();
+        Set<LocalDate> makeUpDays = new HashSet<>();
+        for (DeliveryException e : exceptions) {
+            if (e.getExceptionDate() == null || e.getType() == null) {
+                continue;
+            }
+            if (e.getType() == DeliveryException.TYPE_STOP) {
+                stopDays.add(e.getExceptionDate());
+            } else if (e.getType() == DeliveryException.TYPE_MAKE_UP) {
+                makeUpDays.add(e.getExceptionDate());
+            }
+        }
+
+        // 目标日任务缓存：date → (orderId#productId → task)，按需加载（同一日期只查一次）
+        Map<LocalDate, Map<String, DeliveryTask>> targetCache = new HashMap<>();
+        int requested = 0;
+        for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
+            if (!needsCalendarRebalance(date, stopDays, makeUpDays)) {
+                continue;
+            }
+            List<DeliveryTask> dayTasks = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                    .eq(DeliveryTask::getDeliveryDate, date)
+                    .orderByAsc(DeliveryTask::getOrderId, DeliveryTask::getProductId));
+            // 预检（同平移）：源日存在「配送中(2)」→ 拒绝整批（奶已出库在途，不能改期）
+            List<String> dispatching = dayTasks.stream()
+                    .filter(t -> t.getStatus() != null && t.getStatus() == 2)
+                    .map(DeliveryTask::getTaskNo)
+                    .collect(Collectors.toList());
+            if (!dispatching.isEmpty()) {
+                throw new BusinessException("以下任务已在配送中，请先处理后重排（" + date + "）："
+                        + String.join("、", dispatching));
+            }
+            for (DeliveryTask t : dayTasks) {
+                if (t.getStatus() == null || t.getStatus() != 1) {
+                    continue; // 已终态（已完成/已取消）不参与重排
+                }
+                requested++;
+                int qty = t.getQuantity() == null ? 1 : t.getQuantity();
+                if (qty > MAX_DAILY_TASK_QUANTITY) {
+                    result.setSkipped(result.getSkipped() + 1);
+                    result.getMessages().add(t.getTaskNo() + " 数量 " + qty + " 盒超出单日上限，跳过");
+                    continue;
+                }
+                LocalDate target = resolveRebalanceTarget(t, date, qty, stopDays, makeUpDays, targetCache, today);
+                if (target == null) {
+                    result.setSkipped(result.getSkipped() + 1);
+                    result.getMessages().add(t.getTaskNo() + "（" + date + "）向前找不到可用工作日，跳过，请人工处理");
+                    continue;
+                }
+                int code = relocateTask(t, target,
+                        "配送日历重排至 " + target, "已重排至 " + target,
+                        targetCache.computeIfAbsent(target, this::loadTasksByDate));
+                if (code == RELOCATE_SKIPPED) {
+                    result.setSkipped(result.getSkipped() + 1);
+                    result.getMessages().add(t.getTaskNo() + " 已被并发处理，跳过");
+                } else if (code == RELOCATE_MERGED) {
+                    result.setMerged(result.getMerged() + 1);
+                    result.setShifted(result.getShifted() + 1);
+                } else {
+                    result.setCreated(result.getCreated() + 1);
+                    result.setShifted(result.getShifted() + 1);
+                }
+            }
+        }
+        result.setRequested(requested);
+        if (requested == 0) {
+            result.getMessages().add("所选范围内没有需要重排的任务（周末/停送日的待配送任务为空，或已重排过）");
+        }
+        return result;
+    }
+
+    /** 该日期是否需要重排：周末（且非补课日）或停送日 */
+    private boolean needsCalendarRebalance(LocalDate date, Set<LocalDate> stopDays, Set<LocalDate> makeUpDays) {
+        if (stopDays.contains(date)) {
+            return true;
+        }
+        return isWeekend(date) && !makeUpDays.contains(date);
+    }
+
+    /** 是否为周六/周日 */
+    private boolean isWeekend(LocalDate date) {
+        DayOfWeek day = date.getDayOfWeek();
+        return day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY;
+    }
+
+    /**
+     * 该日期是否为「有效配送日」：不是停送日，且不是「未调休的周末」。
+     * 补课日（例外 type=2）即使是周末也算有效配送日。
+     */
+    private boolean isValidDeliveryDay(LocalDate date, Set<LocalDate> stopDays, Set<LocalDate> makeUpDays) {
+        if (stopDays.contains(date)) {
+            return false;
+        }
+        return !isWeekend(date) || makeUpDays.contains(date);
+    }
+
+    /** 目标日 (orderId#productId → 任务) 映射，用于合并判定 */
+    private Map<String, DeliveryTask> loadTasksByDate(LocalDate date) {
+        return baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                        .eq(DeliveryTask::getDeliveryDate, date))
+                .stream().collect(Collectors.toMap(
+                        t -> t.getOrderId() + "#" + t.getProductId(), Function.identity(), (a, b) -> a));
+    }
+
+    /**
+     * 解析重排目标日。首选目标日：周末（非补课）提前 2 天（周六→周四、周日→周五），
+     * 停送日并入前一个日期；随后校验「有效配送日 + 该订单该品种合并后 ≤3 盒 + 目标日任务仍为待配送」，
+     * 任一不满足则继续向前（更早）找，直到找到可用日或超出回溯上限（或早于今天）。
+     *
+     * @return 可用目标日；找不到返回 null
+     */
+    private LocalDate resolveRebalanceTarget(DeliveryTask source, LocalDate sourceDate, int qty,
+                                             Set<LocalDate> stopDays, Set<LocalDate> makeUpDays,
+                                             Map<LocalDate, Map<String, DeliveryTask>> targetCache,
+                                             LocalDate today) {
+        // 周末（非补课）提前 2 天分散到周四/周五；其余（停送日，含工作日放假）提前 1 天，再逐个向前校验
+        LocalDate target = (isWeekend(sourceDate) && !makeUpDays.contains(sourceDate))
+                ? sourceDate.minusDays(2)
+                : sourceDate.minusDays(1);
+        LocalDate earliest = sourceDate.minusDays(CALENDAR_MAX_LOOKBACK_DAYS);
+        String key = source.getOrderId() + "#" + source.getProductId();
+        while (!target.isBefore(earliest)) {
+            if (target.isBefore(today)) {
+                return null; // 不能把奶改到已经过去的日期
+            }
+            if (!isValidDeliveryDay(target, stopDays, makeUpDays)) {
+                target = target.minusDays(1);
+                continue;
+            }
+            DeliveryTask exist = targetCache.computeIfAbsent(target, this::loadTasksByDate).get(key);
+            if (exist == null || isMergeable(exist, qty)) {
+                return target;
+            }
+            target = target.minusDays(1);
+        }
+        return null;
+    }
+
+    /** 目标日已存在同键任务时，判断能否合并：任务仍待配送且合并后不超过单日上限 */
+    private boolean isMergeable(DeliveryTask exist, int qty) {
+        if (exist.getStatus() == null || exist.getStatus() != 1) {
+            return false; // 已开始配送/已终态：不能并入
+        }
+        int current = exist.getQuantity() == null ? 0 : exist.getQuantity();
+        return current + qty <= MAX_DAILY_TASK_QUANTITY;
+    }
+
+    /**
      * 学期末摊平（见方案 §1.6）。
      *
-     * <p>可重复执行、幂等：每次都把窗口内待配送任务的数量**重置为基准量**再重新分配，
-     * 不在此前结果上叠加。基准量 = 1 + 该任务补送量（从 delivery_compensation 汇总），
-     * 因此拒收补送的 +1 不会被抹掉；摊平后量 = min(基准量 + 分配量, 3)。</p>
+     * <p>可重复执行、幂等：每次都把窗口内待配送任务的**计划量**重置后再重新分配，不在此前结果上叠加。
+     * 计划量 = 待配送总量 − 补送量（补送是按 {@code delivery_compensation.target_task_id} 汇总的
+     * "额外物理盒数"，不参与重排但必须原样保留）；摊平后量 = min(计划量 + 补送量, 3)。
+     * 若把补送量也算进待分配总量，就会在目标量上再加一次而破坏守恒。</p>
      *
-     * <p>剩余量口径 M = 该订单从今天起 status ∈ {1,2} 的 quantity 合计（**含截止日之后的任务**，
-     * 这才是"还剩多少盒"）；K = 截止日当天及之前、仍待配送的任务数。截止日之后的**待配送**任务
-     * 在本次操作中作废（其盒数已提前并入窗口，不能重复配送）；已送达与已开始配送(2)的任务不动。
+     * <p>口径：K = 截止日当天及之前、仍待配送的任务数；截止日之后的**待配送**任务在本次操作中作废
+     * （其盒数已提前并入窗口，不能重复配送）；已送达与已开始配送(2)的任务不动。
      * 作废不改 deliveryEndDate（方案 A），网格不变量只报缺失、不受影响。</p>
      */
     @Override
@@ -1159,20 +1390,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (window.isEmpty()) {
             throw new BusinessException("截止日当天及之前没有可承载的待配送任务，请延后截止日期");
         }
-        // 需摊平的盒数 = 全部待配送任务的量（含将在窗口外作废的部分）；已送出(2)不可改、不计入分配
-        int toDistribute = remaining.stream()
-                .filter(t -> t.getStatus() == 1)
-                .mapToInt(t -> t.getQuantity() == null ? 0 : t.getQuantity()).sum();
-        int k = window.size();
-        if (toDistribute > 2 * k) {
-            throw new BusinessException("剩余 " + toDistribute + " 盒、截止日前的配送日仅 " + k + " 个，"
-                    + "即使每天 2 盒也只能送到 " + (2 * k) + " 盒，请把截止日期延后");
-        }
-        if (toDistribute < k) {
-            throw new BusinessException("剩余 " + toDistribute + " 盒少于截止日前的 " + k + " 个配送日，"
-                    + "请缩短截止日期");
-        }
-        // 补送量：按 target_task_id 汇总（重置基准 = 1 + 补送量，避免抹掉拒收补送）
+        // 补送量：按 target_task_id 汇总。补送是"额外的物理盒数"，不参与摊平重排，但必须原样保留
         List<Long> windowIds = window.stream().map(DeliveryTask::getId).collect(Collectors.toList());
         Map<Long, Integer> compensationMap = new HashMap<>();
         List<DeliveryCompensation> compensations = deliveryCompensationMapper.selectList(
@@ -1180,9 +1398,26 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         for (DeliveryCompensation c : compensations) {
             compensationMap.merge(c.getTargetTaskId(), c.getBoxes() == null ? 0 : c.getBoxes(), Integer::sum);
         }
-        // 分配：基础量 floor，余数前几天各多 1 盒（摊平口径每天 ≤2；叠加补送后总 ≤3）
-        int base = toDistribute / k;
-        int remainder = toDistribute % k;
+        int compensationTotal = compensationMap.values().stream().mapToInt(Integer::intValue).sum();
+
+        // 可分配的「计划盒数」= 全部待配送量 − 补送量。
+        // 补送量若不剔除就会被重复计入（既算进待分配总量、又在目标量上再加一次），导致总量不守恒。
+        int totalPending = remaining.stream()
+                .filter(t -> t.getStatus() == 1)
+                .mapToInt(t -> t.getQuantity() == null ? 0 : t.getQuantity()).sum();
+        int plannedTotal = Math.max(0, totalPending - compensationTotal);
+        int k = window.size();
+        if (plannedTotal > 2 * k) {
+            throw new BusinessException("剩余 " + plannedTotal + " 盒、截止日前的配送日仅 " + k + " 个，"
+                    + "即使每天 2 盒也只能送到 " + (2 * k) + " 盒，请把截止日期延后");
+        }
+        if (plannedTotal < k) {
+            throw new BusinessException("剩余 " + plannedTotal + " 盒少于截止日前的 " + k + " 个配送日，"
+                    + "请缩短截止日期");
+        }
+        // 分配：计划量 floor、余数前几天各多 1 盒（计划每天 ≤2）；叠加补送后单日总量 ≤3
+        int base = plannedTotal / k;
+        int remainder = plannedTotal % k;
         int adjusted = 0;
         for (int i = 0; i < k; i++) {
             DeliveryTask task = window.get(i);

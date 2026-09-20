@@ -105,7 +105,8 @@ INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账'),
 ('order.process.reconcile.enabled', 'true', '过程聚合对账补偿任务开关：修复父订单状态与子任务集合不一致的漂移'),
 ('process.pending.enabled', 'true', '过程实时自愈通道开关：消费自愈待办，秒级驱动父过程聚合'),
-('process.invariant.scan.enabled', 'true', '过程不变量体检开关：周期校验 6 类跨表不变量并自动修复可逆项');
+('process.invariant.scan.enabled', 'true', '过程不变量体检开关：周期校验 6 类跨表不变量并自动修复可逆项'),
+('delivery.weekend.stop', 'false', '周末停送开关：开启后周末任务经「配送日历重排」并入工作日（配合 delivery_exception 维护调休例外）；默认关闭＝不改动现状');
 
 -- ============================================================
 -- 过程补偿规则种子（决策层）
