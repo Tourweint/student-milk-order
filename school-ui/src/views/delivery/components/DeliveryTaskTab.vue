@@ -10,12 +10,16 @@
       <el-button type="primary" @click="fetchList">查询</el-button>
       <el-button @click="handleReset">重置</el-button>
       <div class="spacer" />
+      <el-button v-if="isAdmin" type="warning" :icon="Switch" :disabled="!selectedTasks.length" @click="openShift">
+        平移选中（{{ selectedTasks.length }}）
+      </el-button>
       <el-button v-if="isAdmin" type="danger" :icon="CircleClose" @click="openStockout">缺货取消</el-button>
       <el-button type="success" :icon="Refresh" @click="openGenerate">生成配送任务</el-button>
     </div>
 
     <!-- 表格 -->
-    <el-table v-loading="loading" :data="tableData" stripe>
+    <el-table v-loading="loading" :data="tableData" stripe @selection-change="onSelectionChange">
+      <el-table-column v-if="isAdmin" type="selection" width="46" />
       <el-table-column prop="taskNo" label="任务编号" min-width="180" />
       <el-table-column prop="deliveryDate" label="配送日期" width="120" />
       <el-table-column prop="className" label="班级" width="110" />
@@ -28,9 +32,10 @@
           <el-tag :type="taskStatusTag(row.status)" size="small">{{ taskStatusText(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="180" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.status === 1 && isAdmin" link type="primary" @click="handleStart(row)">开始配送</el-button>
+          <el-button v-if="row.status === 1 && isAdmin" link type="warning" @click="openRebalance(row)">期末摊平</el-button>
           <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleCancel(row)">取消</el-button>
           <el-button link type="info" @click="viewRecords(row)">查看记录</el-button>
         </template>
@@ -88,17 +93,51 @@
         <el-button type="primary" :loading="generating" @click="handleGenerate">生成</el-button>
       </template>
     </el-dialog>
+
+    <!-- 配送日平移动画框 -->
+    <el-dialog v-model="shiftVisible" title="配送日平移" width="500px">
+      <el-alert type="info" :closable="false"
+        title="把选中的「待配送」任务平移到目标日：目标日已有同订单同品种任务则合并数量，否则新建。选中任务已在配送中、或目标日任务已开始配送时，将拒绝整批。" />
+      <el-form label-width="90px" style="margin-top: 14px">
+        <el-form-item label="选中任务">{{ selectedTasks.length }} 条</el-form-item>
+        <el-form-item label="目标日期" required>
+          <el-date-picker v-model="shiftTargetDate" type="date" placeholder="选择目标配送日"
+            value-format="YYYY-MM-DD" class="full-width" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="shiftVisible = false">取消</el-button>
+        <el-button type="warning" :loading="shifting" @click="handleShift">确认平移</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 期末摊平对话框 -->
+    <el-dialog v-model="rebalanceVisible" title="学期末摊平" width="500px">
+      <el-alert type="info" :closable="false"
+        title="把该订单从今天起的剩余盒数，重排到截止日当天及之前的待配送任务上（每天最多 2 盒）；截止日之后的待配送任务将作废。可重复执行。" />
+      <el-form label-width="90px" style="margin-top: 14px">
+        <el-form-item label="订单">{{ rebalanceRow?.orderNo || rebalanceRow?.orderId }}</el-form-item>
+        <el-form-item label="截止日期" required>
+          <el-date-picker v-model="rebalanceDeadline" type="date" placeholder="在此日期前送完"
+            value-format="YYYY-MM-DD" class="full-width" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rebalanceVisible = false">取消</el-button>
+        <el-button type="primary" :loading="rebalancing" @click="handleRebalance">确认摊平</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Refresh, CircleClose } from '@element-plus/icons-vue'
+import { Refresh, CircleClose, Switch } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import {
   getDeliveryTaskList, generateDeliveryTasks, startDeliveryTask, cancelDeliveryTask,
-  stockoutCancelTasks
+  stockoutCancelTasks, shiftDeliveryTasks, rebalanceDeliveryQuantities
 } from '@/api/delivery'
 import { getProductList } from '@/api/product'
 import GradeClassFilter from '@/views/clazz/components/GradeClassFilter.vue'
@@ -117,6 +156,7 @@ const generateVisible = ref(false)
 const generateDate = ref('')
 const generateClassId = ref<number | undefined>(undefined)
 const generating = ref(false)
+const selectedTasks = ref<any[]>([])
 
 const query = reactive({
   pageNum: 1, pageSize: 10,
@@ -156,6 +196,10 @@ function handleReset() {
   query.status = undefined
   query.pageNum = 1
   fetchList()
+}
+
+function onSelectionChange(rows: any[]) {
+  selectedTasks.value = rows
 }
 
 function openGenerate() {
@@ -198,6 +242,78 @@ async function handleCancel(row: any) {
 
 function viewRecords(row: any) {
   emit('view-records', row)
+}
+
+// ==================== 配送日平移 ====================
+const shiftVisible = ref(false)
+const shiftTargetDate = ref('')
+const shifting = ref(false)
+
+function openShift() {
+  if (!selectedTasks.value.length) {
+    ElMessage.warning('请先勾选要平移的任务')
+    return
+  }
+  shiftTargetDate.value = ''
+  shiftVisible.value = true
+}
+
+async function handleShift() {
+  if (!shiftTargetDate.value) {
+    ElMessage.warning('请选择目标日期')
+    return
+  }
+  shifting.value = true
+  try {
+    const res: any = await shiftDeliveryTasks({
+      taskIds: selectedTasks.value.map((t) => t.id),
+      targetDate: shiftTargetDate.value
+    })
+    const d = res.data || {}
+    const parts = [
+      `成功平移 ${d.shifted ?? 0} 条（合并 ${d.merged ?? 0} / 新建 ${d.created ?? 0}）`,
+      `跳过 ${d.skipped ?? 0} 条`
+    ]
+    if (d.messages && d.messages.length) parts.push(d.messages.join('；'))
+    ElMessage.success(parts.join('，'))
+    shiftVisible.value = false
+    selectedTasks.value = []
+    fetchList()
+  } finally {
+    shifting.value = false
+  }
+}
+
+// ==================== 学期末摊平 ====================
+const rebalanceVisible = ref(false)
+const rebalanceRow = ref<any>(null)
+const rebalanceDeadline = ref('')
+const rebalancing = ref(false)
+
+function openRebalance(row: any) {
+  rebalanceRow.value = row
+  rebalanceDeadline.value = ''
+  rebalanceVisible.value = true
+}
+
+async function handleRebalance() {
+  if (!rebalanceRow.value) return
+  if (!rebalanceDeadline.value) {
+    ElMessage.warning('请选择截止日期')
+    return
+  }
+  rebalancing.value = true
+  try {
+    const res: any = await rebalanceDeliveryQuantities({
+      orderId: rebalanceRow.value.orderId,
+      deadline: rebalanceDeadline.value
+    })
+    ElMessage.success(`已调整 ${res.data} 条任务数量`)
+    rebalanceVisible.value = false
+    fetchList()
+  } finally {
+    rebalancing.value = false
+  }
 }
 
 // ==================== 缺货批量取消 ====================

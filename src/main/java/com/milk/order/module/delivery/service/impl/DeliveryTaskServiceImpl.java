@@ -16,15 +16,19 @@ import com.milk.order.module.clazz.mapper.ClassInfoMapper;
 import com.milk.order.module.clazz.mapper.StudentMapper;
 import com.milk.order.module.delivery.dto.SignRequest;
 import com.milk.order.module.delivery.dto.StockoutCancelRequest;
+import com.milk.order.module.delivery.entity.DeliveryCompensation;
 import com.milk.order.module.delivery.entity.DeliveryRecord;
 import com.milk.order.module.delivery.entity.DeliveryTask;
+import com.milk.order.module.delivery.mapper.DeliveryCompensationMapper;
 import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
 import com.milk.order.module.delivery.mapper.DeliveryTaskMapper;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.ParentHomeVO;
 import com.milk.order.module.delivery.vo.PendingSignVO;
+import com.milk.order.module.delivery.vo.ShiftResultVO;
 
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.nutrition.entity.NutritionInfo;
@@ -80,6 +84,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final IdempotencyGuard idempotencyGuard;
     private final DailyQuotaService dailyQuotaService;
     private final ProcessPendingTaskService pendingTaskService;
+    private final DeliveryCompensationMapper deliveryCompensationMapper;
 
     /**
      * 任务开始配送联动订单状态（已支付→配送中）须经 OrderInfoService 统一状态机出口；
@@ -194,6 +199,16 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
      * 不可能出现"一个冲突、另一个不冲突"的情形——「冲突即跳过」这个判定在多实例下依然成立。</p>
      */
     private int createTaskIfAbsent(OrderInfo order, Long productId, int quantity, LocalDate date) {
+        return createTaskReturning(order, productId, quantity, date) == null ? 0 : 1;
+    }
+
+    /**
+     * 创建任务并返回实体（已存在时返回 null）。
+     *
+     * <p>平移与拒收补送需要在拿到新任务 id 后继续写补偿台账 / 联动签收记录，
+     * 因此这里返回实体，而不只是「是否成功」。</p>
+     */
+    private DeliveryTask createTaskReturning(OrderInfo order, Long productId, int quantity, LocalDate date) {
         DeliveryTask task = new DeliveryTask();
         task.setTaskNo(buildTaskNo(order.getId(), productId, date));
         task.setDeliveryDate(date);
@@ -205,7 +220,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         task.setStatus(1); // 待配送
         boolean inserted = idempotencyGuard.insertIgnoringDuplicate(() -> baseMapper.insert(task));
         if (!inserted) {
-            return 0; // 已存在（并发重复生成）：幂等跳过
+            return null; // 已存在（并发重复生成）：幂等跳过
         }
         // 创建签收记录
         DeliveryRecord record = new DeliveryRecord();
@@ -215,7 +230,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         record.setQuantity(quantity);
         record.setSignStatus(2); // 未签收
         deliveryRecordMapper.insert(record);
-        return 1;
+        return task;
     }
 
     // ==================== 任务查询 ====================
@@ -503,6 +518,88 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         return cancelled != null && cancelled.equals(total);
     }
 
+    @Override
+    public int pendingQuantityForCurrentStudent() {
+        // 数据权限：家长仅能查看自己绑定学生的配送数据
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() == null) {
+            throw new BusinessException("请先绑定学生信息");
+        }
+        // 未完成 = 待配送(1) + 配送中(2)；已取消(4)/已完成(3) 的奶不会再送出，不计入剩余。
+        // 库内 SUM 只回传一个数（走 idx_student_status），不改接口契约
+        Integer sum = baseMapper.sumPendingQuantityByStudent(scope.getStudentId());
+        return sum == null ? 0 : sum;
+    }
+
+    /** 家长端首页「近期拒收」最多返回条数 */
+    private static final int RECENT_REJECT_LIMIT = 5;
+
+    /** 拒收原因分类 → 中文（与 schema.sql 的 reject_reason_code 注释保持一致） */
+    private static final Map<String, String> REJECT_REASON_TEXT = Map.of(
+            "DAMAGED", "包装破损",
+            "SOUR", "变质异味",
+            "WRONG_PRODUCT", "错发品种",
+            "SHORTAGE", "数量短缺",
+            "OTHER", "其他");
+
+    @Override
+    public ParentHomeVO parentHomeOverview() {
+        // 数据权限：家长仅能查看自己绑定学生的配送数据
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() == null) {
+            throw new BusinessException("请先绑定学生信息");
+        }
+        Long studentId = scope.getStudentId();
+        ParentHomeVO vo = new ParentHomeVO();
+        Integer sum = baseMapper.sumPendingQuantityByStudent(studentId);
+        vo.setPendingQuantity(sum == null ? 0 : sum);
+
+        // 下次配送日：该学生最早一条仍未送出（待配送）且不早于今天的任务
+        List<DeliveryTask> next = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .select(DeliveryTask::getDeliveryDate)
+                .eq(DeliveryTask::getStudentId, studentId)
+                .eq(DeliveryTask::getStatus, 1)
+                .ge(DeliveryTask::getDeliveryDate, LocalDate.now())
+                .orderByAsc(DeliveryTask::getDeliveryDate)
+                .last("LIMIT 1"));
+        if (!next.isEmpty()) {
+            vo.setNextDeliveryDate(next.get(0).getDeliveryDate());
+        }
+
+        // 近期拒收：只取真拒收（写了原因分类）；退订/缺货取消不写该字段，不会出现在这里
+        List<DeliveryRecord> rejects = deliveryRecordMapper.selectList(new LambdaQueryWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getStudentId, studentId)
+                .eq(DeliveryRecord::getSignStatus, 3)
+                .isNotNull(DeliveryRecord::getRejectReasonCode)
+                .orderByDesc(DeliveryRecord::getId)
+                .last("LIMIT " + RECENT_REJECT_LIMIT));
+        if (rejects.isEmpty()) {
+            return vo;
+        }
+        Map<Long, DeliveryTask> taskMap = baseMapper.selectBatchIds(
+                        rejects.stream().map(DeliveryRecord::getTaskId).collect(Collectors.toSet()))
+                .stream().collect(Collectors.toMap(DeliveryTask::getId, Function.identity()));
+        Map<Long, Product> productMap = productMapper.selectBatchIds(
+                        rejects.stream().map(DeliveryRecord::getProductId).collect(Collectors.toSet()))
+                .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
+        List<ParentHomeVO.RecentReject> recent = new ArrayList<>();
+        for (DeliveryRecord r : rejects) {
+            DeliveryTask t = taskMap.get(r.getTaskId());
+            Product p = productMap.get(r.getProductId());
+            ParentHomeVO.RecentReject item = new ParentHomeVO.RecentReject();
+            item.setRecordId(r.getId());
+            item.setDeliveryDate(t == null ? null : t.getDeliveryDate());
+            item.setProductName(p == null ? null : p.getProductName());
+            item.setReasonCode(r.getRejectReasonCode());
+            String base = REJECT_REASON_TEXT.getOrDefault(r.getRejectReasonCode(), r.getRejectReasonCode());
+            item.setReasonText(StringUtils.hasText(r.getRejectReasonDetail())
+                    ? base + "（" + r.getRejectReasonDetail() + "）" : base);
+            recent.add(item);
+        }
+        vo.setRecentRejects(recent);
+        return vo;
+    }
+
     // ==================== 签收 / 拒收 ====================
 
     @Override
@@ -629,7 +726,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void rejectRecord(Long recordId, String reason) {
+    public void rejectRecord(Long recordId, String reasonCode, String reasonDetail, String reason) {
         DeliveryRecord record = deliveryRecordMapper.selectById(recordId);
         if (record == null) {
             throw new BusinessException("配送记录不存在");
@@ -641,7 +738,7 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (task.getStatus() == null || task.getStatus() != 2) {
             throw new BusinessException("配送站尚未送出该任务，不能拒收");
         }
-        // 过程层严格迁移：任务 配送中(2)→已取消(4)，与并发签收竞争，仅一方生效
+        // 过程层严格迁移：任务 配送中(2)→已取消(4)，与并发签收竞争，仅一方生效（CAS 即幂等闸门）
         processTransitionExecutor.require(
                 TransitionSpec.builder()
                         .scene(StateTransitions.SCENE_DELIVERY_TASK)
@@ -657,8 +754,12 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                         .build(),
                 () -> casTaskStatus(task.getId(), 2, 4));
 
-        // 签收记录 未签收(2)→拒收(3)：未纳入规则表的子状态机，只做 CAS 与留痕
-        String rejectReason = StringUtils.hasText(reason) ? reason : "拒收";
+        // 签收记录 未签收(2)→拒收(3)：未纳入规则表的子状态机，只做 CAS 与留痕。
+        // 结构化原因只在这一条真拒收路径写入；退订/缺货取消走 markRecordRejected，不写 reject_reason_code。
+        String finalReasonCode = StringUtils.hasText(reasonCode) ? reasonCode : null;
+        String finalReasonDetail = StringUtils.hasText(reasonDetail) ? reasonDetail : null;
+        String rejectReason = StringUtils.hasText(reason) ? reason
+                : (finalReasonDetail != null ? finalReasonDetail : "拒收");
         processTransitionExecutor.require(
                 TransitionSpec.builder()
                         .scene(StateTransitions.SCENE_DELIVERY_RECORD)
@@ -677,13 +778,95 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                         .eq(DeliveryRecord::getSignStatus, 2)
                         .set(DeliveryRecord::getSignStatus, 3)
                         .set(DeliveryRecord::getSignTime, LocalDateTime.now())
-                        .set(DeliveryRecord::getRemark, rejectReason)) > 0);
+                        .set(DeliveryRecord::getRemark, rejectReason)
+                        .set(finalReasonCode != null, DeliveryRecord::getRejectReasonCode, finalReasonCode)
+                        .set(finalReasonDetail != null, DeliveryRecord::getRejectReasonDetail, finalReasonDetail)) > 0);
         task.setStatus(4); // 已取消
+
+        // 拒收补送：同一事务内先落补送，再做完成判定（顺序不可颠倒，见方案 §2.1 ⑧）
+        generateCompensation(task);
 
         // 实时通道：任务已到终态，父订单需要重新聚合（同事务内落待办）
         enqueueOrderAggregation(task.getOrderId(), StateTransitions.ACTION_REJECT);
-        // 任务全部到达终态时自动完成订单（父状态聚合出口）
+        // 任务全部到达终态时自动完成订单（父状态聚合出口）——必须在补送落库之后
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
+    }
+
+    /**
+     * 拒收补送落账（见方案 §2.3）。
+     *
+     * <p>顺序：定位/新建 target（拿 id）→ 写补偿台账（撞键即抛异常回滚）→ 加量（仅合并场景）→ 配额（仅零散）。
+     * 补送目标日 = 原任务配送日的次日。</p>
+     *
+     * <ul>
+     *   <li>目标日已有同订单同品种待配送任务：合并 {@code quantity += boxes}（条件更新 status=1，0 行即抛异常）；</li>
+     *   <li>目标日无任务（零散订单为单日、或套餐订单在周期最后一天拒收）：新建一条任务；</li>
+     *   <li>配额：仅 {@code packageId == null} 的零散订单追加，套餐不占机动池；</li>
+     *   <li>幂等：由 {@code delivery_compensation.source_task_id} 唯一键仲裁（CAS 已挡在更前面）。</li>
+     * </ul>
+     */
+    private void generateCompensation(DeliveryTask sourceTask) {
+        OrderInfo order = orderInfoMapper.selectById(sourceTask.getOrderId());
+        if (order == null) {
+            throw new BusinessException("订单不存在，无法补送");
+        }
+        LocalDate targetDate = sourceTask.getDeliveryDate().plusDays(1);
+        int boxes = sourceTask.getQuantity() == null ? 1 : sourceTask.getQuantity();
+
+        // 1. 定位目标日同订单同品种、仍待配送的任务（有则合并、无则新建）
+        DeliveryTask target = baseMapper.selectOne(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, sourceTask.getOrderId())
+                .eq(DeliveryTask::getProductId, sourceTask.getProductId())
+                .eq(DeliveryTask::getDeliveryDate, targetDate)
+                .eq(DeliveryTask::getStatus, 1)
+                .last("LIMIT 1"));
+        boolean needCreate = target == null;
+        Long targetTaskId;
+        if (needCreate) {
+            DeliveryTask created = createTaskReturning(order, sourceTask.getProductId(), boxes, targetDate);
+            if (created == null) {
+                throw new BusinessException("补送任务创建失败（目标日已存在同键任务），请稍后重试");
+            }
+            targetTaskId = created.getId();
+        } else {
+            targetTaskId = target.getId();
+        }
+
+        // 2. 写补偿台账：一个被拒收任务只允许补一次；撞唯一键抛异常回滚
+        //    （不能 return —— @Transactional 里 return 是正常提交，会留下"原任务已取消但无补偿"的静默丢盒）
+        DeliveryCompensation compensation = new DeliveryCompensation();
+        compensation.setSourceTaskId(sourceTask.getId());
+        compensation.setTargetTaskId(targetTaskId);
+        compensation.setOrderId(sourceTask.getOrderId());
+        compensation.setProductId(sourceTask.getProductId());
+        compensation.setBoxes(boxes);
+        compensation.setCompensationDate(targetDate);
+        compensation.setRemark("拒收补送自任务 " + sourceTask.getTaskNo());
+        boolean inserted = idempotencyGuard.insertIgnoringDuplicate(
+                () -> deliveryCompensationMapper.insert(compensation));
+        if (!inserted) {
+            throw new BusinessException("该任务已补送过，请勿重复操作");
+        }
+
+        // 3. 合并场景在此加量（新建场景步骤 1 已按 boxes 建好，不再加）
+        if (!needCreate) {
+            boolean updated = lambdaUpdate()
+                    .eq(DeliveryTask::getId, targetTaskId)
+                    .eq(DeliveryTask::getStatus, 1)
+                    .setSql("quantity = quantity + " + boxes)
+                    .update();
+            if (!updated) {
+                throw new BusinessException("次日任务已开始配送，补送失败，请改选目标日或联系管理员");
+            }
+            deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                    .eq(DeliveryRecord::getTaskId, targetTaskId)
+                    .setSql("quantity = quantity + " + boxes));
+        }
+
+        // 4. 配额：仅零散订单追加（套餐不占机动池，调了会污染）
+        if (order.getPackageId() == null) {
+            dailyQuotaService.addCompensationBox(order.getId(), sourceTask.getProductId(), targetDate, boxes);
+        }
     }
 
     // ==================== 配送前缺货批量取消 ====================
@@ -806,6 +989,260 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             enqueueOrderAggregation(orderId, StateTransitions.ACTION_TASK_CANCEL);
         }
         return count;
+    }
+
+    // ==================== 配送日平移 / 学期末摊平 ====================
+
+    /**
+     * 配送日平移（见方案 §1.2 / §1.3）。
+     *
+     * <p>预检两关：① 源任务存在「配送中(2)」→ 拒绝整批；② 目标日同订单同品种任务存在非「待配送(1)」→ 拒绝整批。
+     * 通过后逐条 {@code attempt}：CAS 作废原任务（1→4，幂等闸门），成功再合并/新建到目标日；
+     * 单条 CAS 失败（并发被处理）只跳过该条，不影响其余。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ShiftResultVO shiftTasksToDate(List<Long> taskIds, String targetDate) {
+        LocalDate target = parseDate(targetDate, "目标配送日期");
+        ShiftResultVO result = new ShiftResultVO();
+        if (taskIds == null || taskIds.isEmpty()) {
+            throw new BusinessException("请选择要平移的配送任务");
+        }
+        result.setRequested(taskIds.size());
+
+        List<DeliveryTask> tasks = baseMapper.selectBatchIds(taskIds);
+        if (tasks.isEmpty()) {
+            throw new BusinessException("所选配送任务不存在");
+        }
+        // 预检①：源任务存在「配送中(2)」→ 拒绝整批（奶已出库在途，不能改期）
+        List<DeliveryTask> delivering = tasks.stream()
+                .filter(t -> t.getStatus() != null && t.getStatus() == 2)
+                .collect(Collectors.toList());
+        if (!delivering.isEmpty()) {
+            throw new BusinessException("以下任务已在配送中，请先处理后平移："
+                    + delivering.stream().map(DeliveryTask::getTaskNo).collect(Collectors.joining("、")));
+        }
+        // 只处理待配送(1)；已终态(3/4)跳过
+        List<DeliveryTask> pending = tasks.stream()
+                .filter(t -> t.getStatus() != null && t.getStatus() == 1)
+                .collect(Collectors.toList());
+        result.setSkipped(tasks.size() - pending.size());
+        if (pending.isEmpty()) {
+            result.getMessages().add("所选任务均非待配送状态，无任务可平移");
+            return result;
+        }
+        // 预检②：目标日同订单同品种任务存在非「待配送」→ 拒绝整批
+        List<Long> orderIds = pending.stream().map(DeliveryTask::getOrderId).distinct().collect(Collectors.toList());
+        Map<String, DeliveryTask> targetMap = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                        .in(DeliveryTask::getOrderId, orderIds)
+                        .eq(DeliveryTask::getDeliveryDate, target))
+                .stream().collect(Collectors.toMap(
+                        t -> t.getOrderId() + "#" + t.getProductId(), Function.identity(), (a, b) -> a));
+        List<String> conflicts = new ArrayList<>();
+        for (DeliveryTask t : pending) {
+            DeliveryTask exist = targetMap.get(t.getOrderId() + "#" + t.getProductId());
+            if (exist != null && (exist.getStatus() == null || exist.getStatus() != 1)) {
+                conflicts.add(exist.getTaskNo());
+            }
+        }
+        if (!conflicts.isEmpty()) {
+            throw new BusinessException("目标日以下任务已开始配送，请改选目标日："
+                    + String.join("、", conflicts));
+        }
+        // 逐条处理：CAS 作废原任务（幂等闸门）→ 合并/新建到目标日
+        for (DeliveryTask t : pending) {
+            boolean cancelled = processTransitionExecutor.attempt(
+                    TransitionSpec.builder()
+                            .scene(StateTransitions.SCENE_DELIVERY_TASK)
+                            .action(StateTransitions.ACTION_TASK_CANCEL)
+                            .sceneText("配送任务")
+                            .entityType("delivery_task")
+                            .entityId(t.getId())
+                            .bizNo(t.getTaskNo())
+                            .fromStatus(1)
+                            .toStatus(4)
+                            .remark("配送日平移至 " + target)
+                            .build(),
+                    () -> lambdaUpdate()
+                            .eq(DeliveryTask::getId, t.getId())
+                            .eq(DeliveryTask::getStatus, 1)
+                            .set(DeliveryTask::getStatus, 4)
+                            .set(DeliveryTask::getRemark, "配送日平移至 " + target)
+                            .update());
+            if (!cancelled) {
+                result.setSkipped(result.getSkipped() + 1);
+                result.getMessages().add(t.getTaskNo() + " 已被并发处理，跳过");
+                continue;
+            }
+            // 原记录不置拒收（平移不是拒收），仅标注 remark，保持未签收
+            deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                    .eq(DeliveryRecord::getTaskId, t.getId())
+                    .eq(DeliveryRecord::getSignStatus, 2)
+                    .set(DeliveryRecord::getRemark, "已平移至 " + target));
+
+            int qty = t.getQuantity() == null ? 1 : t.getQuantity();
+            DeliveryTask exist = targetMap.get(t.getOrderId() + "#" + t.getProductId());
+            if (exist != null) {
+                boolean updated = lambdaUpdate()
+                        .eq(DeliveryTask::getId, exist.getId())
+                        .eq(DeliveryTask::getStatus, 1)
+                        .setSql("quantity = quantity + " + qty)
+                        .update();
+                if (!updated) {
+                    throw new BusinessException(exist.getTaskNo() + " 已开始配送，平移失败，请改选目标日");
+                }
+                deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                        .eq(DeliveryRecord::getTaskId, exist.getId())
+                        .setSql("quantity = quantity + " + qty));
+                result.setMerged(result.getMerged() + 1);
+            } else {
+                OrderInfo order = orderInfoMapper.selectById(t.getOrderId());
+                if (order == null) {
+                    throw new BusinessException("订单不存在，无法平移 " + t.getTaskNo());
+                }
+                DeliveryTask created = createTaskReturning(order, t.getProductId(), qty, target);
+                if (created == null) {
+                    throw new BusinessException(t.getTaskNo() + " 平移失败：目标日已存在同键任务");
+                }
+                // 登记进 map：同订单同品种的后续源任务应合并到这条新任务，而不是重复新建
+                targetMap.put(t.getOrderId() + "#" + t.getProductId(), created);
+                result.setCreated(result.getCreated() + 1);
+            }
+            result.setShifted(result.getShifted() + 1);
+            enqueueOrderAggregation(t.getOrderId(), StateTransitions.ACTION_TASK_CANCEL);
+        }
+        return result;
+    }
+
+    /**
+     * 学期末摊平（见方案 §1.6）。
+     *
+     * <p>可重复执行、幂等：每次都把窗口内待配送任务的数量**重置为基准量**再重新分配，
+     * 不在此前结果上叠加。基准量 = 1 + 该任务补送量（从 delivery_compensation 汇总），
+     * 因此拒收补送的 +1 不会被抹掉；摊平后量 = min(基准量 + 分配量, 3)。</p>
+     *
+     * <p>剩余量口径 M = 该订单从今天起 status ∈ {1,2} 的 quantity 合计（**含截止日之后的任务**，
+     * 这才是"还剩多少盒"）；K = 截止日当天及之前、仍待配送的任务数。截止日之后的**待配送**任务
+     * 在本次操作中作废（其盒数已提前并入窗口，不能重复配送）；已送达与已开始配送(2)的任务不动。
+     * 作废不改 deliveryEndDate（方案 A），网格不变量只报缺失、不受影响。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int adjustQuantitiesBeforeDeadline(Long orderId, String deadline) {
+        if (orderId == null) {
+            throw new BusinessException("订单不能为空");
+        }
+        if (orderInfoMapper.selectById(orderId) == null) {
+            throw new BusinessException("订单不存在");
+        }
+        LocalDate today = LocalDate.now();
+        LocalDate end = parseDate(deadline, "截止日期");
+        if (end.isBefore(today)) {
+            throw new BusinessException("截止日期不能早于今天");
+        }
+        // 订单从今天起的全部剩余任务（待配送 1 + 配送中 2）
+        List<DeliveryTask> remaining = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .in(DeliveryTask::getStatus, Arrays.asList(1, 2))
+                .ge(DeliveryTask::getDeliveryDate, today)
+                .orderByAsc(DeliveryTask::getDeliveryDate));
+        if (remaining.isEmpty()) {
+            throw new BusinessException("该订单没有可摊平的剩余任务");
+        }
+        // 可承载窗口：截止日当天及之前的待配送任务；窗口外待配送任务将作废（盒数提前消化）
+        List<DeliveryTask> window = remaining.stream()
+                .filter(t -> t.getStatus() == 1 && !t.getDeliveryDate().isAfter(end))
+                .collect(Collectors.toList());
+        List<DeliveryTask> tail = remaining.stream()
+                .filter(t -> t.getStatus() == 1 && t.getDeliveryDate().isAfter(end))
+                .collect(Collectors.toList());
+        if (window.isEmpty()) {
+            throw new BusinessException("截止日当天及之前没有可承载的待配送任务，请延后截止日期");
+        }
+        // 需摊平的盒数 = 全部待配送任务的量（含将在窗口外作废的部分）；已送出(2)不可改、不计入分配
+        int toDistribute = remaining.stream()
+                .filter(t -> t.getStatus() == 1)
+                .mapToInt(t -> t.getQuantity() == null ? 0 : t.getQuantity()).sum();
+        int k = window.size();
+        if (toDistribute > 2 * k) {
+            throw new BusinessException("剩余 " + toDistribute + " 盒、截止日前的配送日仅 " + k + " 个，"
+                    + "即使每天 2 盒也只能送到 " + (2 * k) + " 盒，请把截止日期延后");
+        }
+        if (toDistribute < k) {
+            throw new BusinessException("剩余 " + toDistribute + " 盒少于截止日前的 " + k + " 个配送日，"
+                    + "请缩短截止日期");
+        }
+        // 补送量：按 target_task_id 汇总（重置基准 = 1 + 补送量，避免抹掉拒收补送）
+        List<Long> windowIds = window.stream().map(DeliveryTask::getId).collect(Collectors.toList());
+        Map<Long, Integer> compensationMap = new HashMap<>();
+        List<DeliveryCompensation> compensations = deliveryCompensationMapper.selectList(
+                new LambdaQueryWrapper<DeliveryCompensation>().in(DeliveryCompensation::getTargetTaskId, windowIds));
+        for (DeliveryCompensation c : compensations) {
+            compensationMap.merge(c.getTargetTaskId(), c.getBoxes() == null ? 0 : c.getBoxes(), Integer::sum);
+        }
+        // 分配：基础量 floor，余数前几天各多 1 盒（摊平口径每天 ≤2；叠加补送后总 ≤3）
+        int base = toDistribute / k;
+        int remainder = toDistribute % k;
+        int adjusted = 0;
+        for (int i = 0; i < k; i++) {
+            DeliveryTask task = window.get(i);
+            int normal = base + (i < remainder ? 1 : 0);
+            int compensated = compensationMap.getOrDefault(task.getId(), 0);
+            int targetQuantity = Math.min(normal + compensated, 3);
+            if (task.getQuantity() != null && task.getQuantity() == targetQuantity) {
+                continue; // 无需变更（重复执行时自然跳过，保证幂等）
+            }
+            boolean updated = lambdaUpdate()
+                    .eq(DeliveryTask::getId, task.getId())
+                    .eq(DeliveryTask::getStatus, 1)
+                    .set(DeliveryTask::getQuantity, targetQuantity)
+                    .update();
+            if (updated) {
+                deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                        .eq(DeliveryRecord::getTaskId, task.getId())
+                        .set(DeliveryRecord::getQuantity, targetQuantity));
+                adjusted++;
+            }
+        }
+        // 截止日之后的待配送任务作废（盒数已提前并入窗口，不能重复配送）
+        for (DeliveryTask t : tail) {
+            processTransitionExecutor.attempt(
+                    TransitionSpec.builder()
+                            .scene(StateTransitions.SCENE_DELIVERY_TASK)
+                            .action(StateTransitions.ACTION_TASK_CANCEL)
+                            .sceneText("配送任务")
+                            .entityType("delivery_task")
+                            .entityId(t.getId())
+                            .bizNo(t.getTaskNo())
+                            .fromStatus(1)
+                            .toStatus(4)
+                            .remark("期末摊平：并入 " + end + " 前配送")
+                            .build(),
+                    () -> lambdaUpdate()
+                            .eq(DeliveryTask::getId, t.getId())
+                            .eq(DeliveryTask::getStatus, 1)
+                            .set(DeliveryTask::getStatus, 4)
+                            .set(DeliveryTask::getRemark, "期末摊平：并入 " + end + " 前配送")
+                            .update());
+            deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                    .eq(DeliveryRecord::getTaskId, t.getId())
+                    .eq(DeliveryRecord::getSignStatus, 2)
+                    .set(DeliveryRecord::getRemark, "已并入期末摊平（截止 " + end + "）"));
+            enqueueOrderAggregation(orderId, StateTransitions.ACTION_TASK_CANCEL);
+        }
+        return adjusted;
+    }
+
+    /** 解析 yyyy-MM-dd 日期，失败抛业务异常 */
+    private LocalDate parseDate(String text, String fieldName) {
+        if (!StringUtils.hasText(text)) {
+            throw new BusinessException(fieldName + "不能为空");
+        }
+        try {
+            return LocalDate.parse(text);
+        } catch (Exception e) {
+            throw new BusinessException(fieldName + "格式不正确");
+        }
     }
 
     // ==================== 配送记录查询 ====================

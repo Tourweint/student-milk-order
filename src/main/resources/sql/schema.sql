@@ -328,7 +328,9 @@ CREATE TABLE IF NOT EXISTS delivery_task (
     UNIQUE KEY uk_order_product_date (order_id, product_id, delivery_date),
     KEY idx_delivery_date (delivery_date),
     KEY idx_class_id (class_id),
-    KEY idx_status (status)
+    KEY idx_status (status),
+    -- 家长端「剩余待配送盒数」按 student_id + status 过滤，避免扫 idx_status 大集合
+    KEY idx_student_status (student_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='配送任务表';
 
 -- 配送记录表
@@ -342,12 +344,34 @@ CREATE TABLE IF NOT EXISTS delivery_record (
     sign_time DATETIME COMMENT '签收时间',
     sign_person VARCHAR(50) COMMENT '签收人',
     remark VARCHAR(255) COMMENT '备注',
+    reject_reason_code VARCHAR(32) COMMENT '拒收原因分类：DAMAGED/SOUR/WRONG_PRODUCT/SHORTAGE/OTHER（仅真拒收写入，退订/缺货取消不写）',
+    reject_reason_detail VARCHAR(255) COMMENT '拒收详细描述（班主任填写，可选）',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     KEY idx_task_id (task_id),
     KEY idx_student_id (student_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='配送记录表';
+
+-- 拒收补送补偿台账
+-- 一个被拒收任务只允许产生一次补偿（uk_source_task 仲裁）；
+-- target_task_id 指向补送落账的目标任务（套餐订单合并到次日任务 / 零散订单新建的任务），
+-- 摊平算法据此还原「该任务基础量 = 1 + 补送量」。
+CREATE TABLE IF NOT EXISTS delivery_compensation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '补偿台账ID',
+    source_task_id BIGINT NOT NULL COMMENT '被拒收的原任务ID',
+    target_task_id BIGINT NOT NULL COMMENT '补送落账的目标任务ID',
+    order_id BIGINT NOT NULL COMMENT '订单ID',
+    product_id BIGINT NOT NULL COMMENT '奶品ID',
+    boxes INT NOT NULL DEFAULT 1 COMMENT '补送盒数',
+    compensation_date DATE NOT NULL COMMENT '补送目标日期（次日）',
+    remark VARCHAR(255) COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_source_task (source_task_id),
+    KEY idx_target_task (target_task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拒收补送补偿台账';
 
 -- ============================================================
 -- 6. 营养统计模块

@@ -36,6 +36,21 @@ public interface DailyQuotaService extends IService<DailyQuota> {
     void restoreForOrderProductDate(Long orderId, Long productId, LocalDate quotaDate);
 
     /**
+     * 拒收补送配额追加（**仅零散订单调用**，套餐订单不占配额不得调用）。
+     *
+     * <p>在补送日池子上追加 {@code used_quota += boxes} 并写 {@code daily_quota_usage} 台账
+     * （台账 {@code quota_date} 为补送日，与支付时扣减的 {@code delivery_start_date} 不同，
+     * 不撞 {@code uk_order_product_pool}）。</p>
+     *
+     * <p><b>不做 {@code used + boxes <= total} 上限校验</b>：破损/变质是商家责任，补送成本由商家承担，
+     * 池子已满也允许追加，避免"池子满 → 补送失败 → 学生少一盒"。因此 {@code used_quota} 可能超过
+     * {@code total_quota}（显式口径）；{@code QuotaLedgerInvariant} 只校验 {@code used == 台账合计}，不受影响。</p>
+     *
+     * <p>池子不存在时抛业务异常（无法确定补送到哪个池子）。幂等由调用方（拒收补偿台账唯一键）保证。</p>
+     */
+    void addCompensationBox(Long orderId, Long productId, LocalDate quotaDate, int boxes);
+
+    /**
      * 不变量修复：以台账合计为准重算某池子的已售盒数（INV_QUOTA_LEDGER）。
      *
      * <p>只在不变量体检查出「used_quota ≠ 台账合计」时由修复器调用。

@@ -9,7 +9,9 @@ import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.ParentHomeVO;
 import com.milk.order.module.delivery.vo.PendingSignVO;
+import com.milk.order.module.delivery.vo.ShiftResultVO;
 import com.milk.order.module.order.entity.OrderInfo;
 
 import java.util.List;
@@ -48,6 +50,20 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     boolean hasAllTasksCancelled(Long orderId);
 
     /**
+     * 当前登录家长绑定学生的「剩余待配送」盒数合计：未完成（待配送 1 + 配送中 2）任务的数量之和，
+     * 已取消/已完成不计。家长端首页展示用，数据范围限定为绑定的学生。
+     */
+    int pendingQuantityForCurrentStudent();
+
+    /**
+     * 家长端首页聚合：剩余待配送盒数 + 下次配送日 + 近期拒收（只读，数据范围限定为绑定学生）。
+     *
+     * <p>与 {@link #pendingQuantityForCurrentStudent()} 同一口径；「近期拒收」只取真拒收
+     * （`sign_status=3 AND reject_reason_code IS NOT NULL`），用于向家长解释剩余减少的原因。</p>
+     */
+    ParentHomeVO parentHomeOverview();
+
+    /**
      * 不变量修复（INV_TASK_RECORD）：把「任务已完成但签收记录未签收」的记录补齐为已签收。
      * 经统一迁移出口执行并留痕，幂等，返回是否生效。
      */
@@ -81,8 +97,39 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     /** 订单退订联动：取消该订单下全部未完成任务的未签收记录，返回取消任务数 */
     int cancelPendingTasksForOrder(Long orderId);
 
-    /** 拒收（未签收→拒收，任务→已取消）；仅可拒收已开始配送（已送出）的任务 */
-    void rejectRecord(Long recordId, String reason);
+    /**
+     * 拒收（未签收→拒收，任务→已取消），并在同一事务内按订单类型落拒收补送；仅可拒收已开始配送（已送出）的任务。
+     *
+     * @param reasonCode   拒收原因分类（DAMAGED/SOUR/WRONG_PRODUCT/SHORTAGE/OTHER，可空）
+     * @param reasonDetail 拒收详细描述（可空）
+     * @param reason       兼容旧调用方的自由文本原因（可空）
+     */
+    void rejectRecord(Long recordId, String reasonCode, String reasonDetail, String reason);
+
+    /** 兼容旧签名：仅自由文本原因 */
+    default void rejectRecord(Long recordId, String reason) {
+        rejectRecord(recordId, null, null, reason);
+    }
+
+    /**
+     * 配送日平移：把指定待配送任务平移到 targetDate。
+     *
+     * <p>执行前两级预检：源任务存在「配送中(2)」则拒绝整批；目标日同订单同品种任务存在非「待配送(1)」则拒绝整批。
+     * 通过后逐条 {@code attempt} 作废原任务并合并/新建到目标日（CAS 失败即跳过该条，不影响其余）。</p>
+     *
+     * @return 平移结果统计
+     */
+    ShiftResultVO shiftTasksToDate(List<Long> taskIds, String targetDate);
+
+    /**
+     * 学期末摊平：把订单在 [今天, 截止日] 天内 status=1 的任务按剩余量重新分配（可重复执行，幂等）。
+     *
+     * <p>重置基准 = 1 + 该任务补送量（从 delivery_compensation 汇总），避免抹掉拒收补送；
+     * 摊平后量 = min(基础量 + 分配量, 3)。已过期的（delivery_date &lt; today）与配送中(2)的任务不动。</p>
+     *
+     * @return 调整的任务数
+     */
+    int adjustQuantitiesBeforeDeadline(Long orderId, String deadline);
 
     /** 配送记录分页（日期/班级/学生/签收状态筛选） */
     IPage<DeliveryRecordVO> pageRecords(Long pageNum, Long pageSize, String deliveryDate, Long classId,

@@ -63,9 +63,16 @@ public class SecurityConfig {
                 .antMatchers(HttpMethod.PUT, "/api/delivery/task/cancel/**").hasAnyRole("ADMIN", "TEACHER")
                 // 配送前缺货批量取消（影响当日全部待配送任务与配额回补）：仅管理员
                 .antMatchers(HttpMethod.PUT, "/api/delivery/task/stockout-cancel").hasRole("ADMIN")
+                // 配送日平移 / 学期末摊平（批量改期与改量，影响面大）：仅管理员
+                .antMatchers(HttpMethod.POST, "/api/delivery/task/shift").hasRole("ADMIN")
+                .antMatchers(HttpMethod.POST, "/api/delivery/task/rebalance").hasRole("ADMIN")
                 // "今日已送出"批量开始配送（退款闸门动作）：管理员与配送站；单条开始配送同权限（班主任不可开始配送，只读+签收）
                 .antMatchers(HttpMethod.PUT, "/api/delivery/task/batch-start").hasAnyRole("ADMIN", "DELIVERY")
                 .antMatchers(HttpMethod.PUT, "/api/delivery/task/start/**").hasAnyRole("ADMIN", "DELIVERY")
+                // 家长端首页查看绑定学生的剩余待配送盒数（数据范围由 Service 层限定为学生本人）
+                .antMatchers(HttpMethod.GET, "/api/delivery/task/pending-quantity").hasRole("PARENT")
+                // 家长端首页聚合（剩余盒数 + 下次配送日 + 近期拒收）：同样仅家长
+                .antMatchers(HttpMethod.GET, "/api/delivery/task/parent-home").hasRole("PARENT")
                 .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER", "DELIVERY")
                 .antMatchers(HttpMethod.POST, "/api/delivery/record/**").hasAnyRole("ADMIN", "TEACHER")
                 // 完成订单仅管理端角色（订单已无独立"开始配送"入口，配送中由配送任务联动触发）

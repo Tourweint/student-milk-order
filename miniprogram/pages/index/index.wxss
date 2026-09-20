@@ -17,6 +17,90 @@
   margin-top: 8rpx;
 }
 
+/* 剩余待配送 */
+.pending-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pending-label {
+  font-size: 28rpx;
+  color: #606266;
+}
+
+.pending-value {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.pending-main {
+  display: flex;
+  flex-direction: column;
+}
+
+.pending-tip {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 4rpx;
+}
+
+.pending-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.pending-next {
+  font-size: 22rpx;
+  color: #409eff;
+  margin-top: 4rpx;
+}
+
+/* 近期拒收 */
+.reject-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid #f0f2f5;
+}
+
+.reject-item:last-child {
+  border-bottom: none;
+}
+
+.reject-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin-right: 16rpx;
+}
+
+.reject-product {
+  font-size: 28rpx;
+  color: #1f2d3d;
+}
+
+.reject-reason {
+  font-size: 22rpx;
+  color: #e6a23c;
+  margin-top: 4rpx;
+}
+
+.reject-date {
+  font-size: 22rpx;
+  color: #909399;
+}
+
+.reject-note {
+  font-size: 22rpx;
+  color: #909399;
+  margin-top: 12rpx;
+}
+
 /* 套餐横向滚动 */
 .pkg-scroll {
   white-space: nowrap;

@@ -323,6 +323,37 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
         }
     }
 
+    /**
+     * 拒收补送配额追加（仅零散订单调用）：见 {@link DailyQuotaService#addCompensationBox}。
+     *
+     * <p>显式 READ_COMMITTED 与 {@code deduct} 同一套并发语义：本方法也是"读最新版本 → 写回"。</p>
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
+    public void addCompensationBox(Long orderId, Long productId, LocalDate quotaDate, int boxes) {
+        if (orderId == null || productId == null || quotaDate == null || boxes <= 0) {
+            return;
+        }
+        DailyQuota quota = baseMapper.selectForUpdate(quotaDate, productId);
+        if (quota == null) {
+            Product p = productMapper.selectById(productId);
+            String name = p == null ? "奶品" + productId : p.getProductName();
+            throw new BusinessException("「" + name + "」" + quotaDate + " 未配置机动配额池，无法补送");
+        }
+        // 不校验 used + boxes <= total：补送成本由商家承担，池子已满也允许追加（可能超池）
+        lambdaUpdate()
+                .eq(DailyQuota::getId, quota.getId())
+                .setSql("used_quota = IFNULL(used_quota, 0) + " + boxes)
+                .update();
+        DailyQuotaUsage usage = new DailyQuotaUsage();
+        usage.setOrderId(orderId);
+        usage.setProductId(productId);
+        usage.setQuotaDate(quotaDate);
+        usage.setBoxes(boxes);
+        dailyQuotaUsageMapper.insert(usage);
+        log.info("[拒收补送] 订单 {} 品种 {} 在 {} 追加配额 {} 盒", orderId, productId, quotaDate, boxes);
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean reconcileUsedQuota(Long quotaId, int ledgerBoxes) {

@@ -45,6 +45,12 @@
       <el-table-column prop="signPerson" label="签收人" width="100">
         <template #default="{ row }">{{ row.signPerson || '—' }}</template>
       </el-table-column>
+      <el-table-column label="拒收原因" min-width="160">
+        <template #default="{ row }">
+          <span v-if="row.signStatus === 3">{{ rejectReasonText(row) }}</span>
+          <span v-else>—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
           <el-button v-if="row.signStatus === 2" link type="success" @click="handleSign(row)">签收</el-button>
@@ -78,6 +84,26 @@
       <template #footer>
         <el-button @click="signVisible = false">取消</el-button>
         <el-button type="primary" :loading="signing" @click="confirmSign">确认签收</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 拒收对话框（结构化原因，提交后后端自动落补送） -->
+    <el-dialog v-model="rejectVisible" title="拒收确认" width="440px">
+      <el-alert type="warning" :closable="false"
+        title="拒收后系统会自动在次日补送一盒（套餐订单合并到次日任务、零散订单另建任务），无需人工登记。" />
+      <el-form label-width="80px" style="margin-top: 14px">
+        <el-form-item label="拒收原因">
+          <el-select v-model="rejectForm.reasonCode" placeholder="选择原因分类" clearable style="width: 100%">
+            <el-option v-for="o in rejectReasonOptions" :key="o.value" :label="o.label" :value="o.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="详细描述">
+          <el-input v-model="rejectForm.reasonDetail" type="textarea" :rows="2" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="rejectVisible = false">取消</el-button>
+        <el-button type="danger" :loading="rejecting" @click="confirmReject">确认拒收</el-button>
       </template>
     </el-dialog>
   </div>
@@ -241,14 +267,47 @@ async function handleBatchSign(date?: string) {
   }
 }
 
-async function handleReject(row: any) {
-  const { value: reason } = await ElMessageBox.prompt('请输入拒收原因（可选）', '拒收确认', {
-    type: 'warning', inputPlaceholder: '可留空'
-  }).catch(() => ({ value: undefined as any }))
-  if (reason === undefined) return
-  await rejectDeliveryRecord(row.id, reason || undefined)
-  ElMessage.success('已拒收')
-  fetchList()
+const rejectReasonOptions = [
+  { value: 'DAMAGED', label: '包装破损' },
+  { value: 'SOUR', label: '变质异味' },
+  { value: 'WRONG_PRODUCT', label: '错发品种' },
+  { value: 'SHORTAGE', label: '数量短缺' },
+  { value: 'OTHER', label: '其他' }
+]
+const rejectReasonText = (row: any) => {
+  const label = rejectReasonOptions.find((x) => x.value === row.rejectReasonCode)?.label
+  const detail = row.rejectReasonDetail
+  if (label && detail) return `${label}（${detail}）`
+  return label || detail || row.remark || '—'
+}
+
+const rejectVisible = ref(false)
+const rejecting = ref(false)
+const rejectRow = ref<any>(null)
+const rejectForm = reactive({ reasonCode: '', reasonDetail: '' })
+
+function handleReject(row: any) {
+  rejectRow.value = row
+  rejectForm.reasonCode = ''
+  rejectForm.reasonDetail = ''
+  rejectVisible.value = true
+}
+
+async function confirmReject() {
+  if (!rejectRow.value) return
+  rejecting.value = true
+  try {
+    await rejectDeliveryRecord({
+      recordId: rejectRow.value.id,
+      reasonCode: rejectForm.reasonCode || undefined,
+      reasonDetail: rejectForm.reasonDetail || undefined
+    })
+    ElMessage.success('已拒收，系统已自动生成补送')
+    rejectVisible.value = false
+    fetchList()
+  } finally {
+    rejecting.value = false
+  }
 }
 
 onMounted(() => {

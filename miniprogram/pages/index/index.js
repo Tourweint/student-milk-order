@@ -3,6 +3,7 @@
  */
 const auth = require('../../utils/auth')
 const productApi = require('../../api/product')
+const deliveryApi = require('../../api/delivery')
 const cart = require('../../utils/cart')
 
 Page({
@@ -11,7 +12,11 @@ Page({
     packages: [],
     products: [],
     cartCount: 0,
-    loading: true
+    loading: true,
+    pendingQuantity: 0,
+    pendingLoaded: false,
+    nextDeliveryDate: '',
+    recentRejects: []
   },
 
   onShow() {
@@ -40,6 +45,34 @@ Page({
       console.error('加载首页数据失败', e)
     } finally {
       this.setData({ loading: false })
+    }
+    // 家长端首页信息（剩余/下次配送日/近期拒收）独立加载：失败不影响首页其他内容
+    this.loadParentHome()
+  },
+
+  /**
+   * 家长端首页聚合：剩余待配送 + 下次配送日 + 近期拒收。
+   * 独立加载，失败不得影响首页其余内容，也不得白屏。
+   * 兜底约定（勿破坏）：后端不可用 / 家长未绑定时保持 pendingLoaded=false（卡片不渲染），
+   * 且不得把取不到值当成 0 显示——否则会出现「已全部配送完成」这种误导性空态。
+   */
+  async loadParentHome() {
+    try {
+      const data = await deliveryApi.getParentHome()
+      const quantity = data && data.pendingQuantity
+      // 只接受非负整数：null/undefined/字符串等一律按失败处理
+      // （不能用 Number() 转换——Number(null) === 0 会被静默当成"没有待配送"）
+      if (!Number.isInteger(quantity) || quantity < 0) {
+        throw new Error('剩余待配送返回值异常：' + quantity)
+      }
+      this.setData({
+        pendingQuantity: quantity,
+        pendingLoaded: true,
+        nextDeliveryDate: (data && data.nextDeliveryDate) || '',
+        recentRejects: (data && data.recentRejects) || []
+      })
+    } catch (e) {
+      console.error('加载家长端首页信息失败', e)
     }
   },
 

@@ -30,6 +30,8 @@ public class DeliveryRecordVO implements Serializable {
     private LocalDateTime signTime;
     private String signPerson;
     private String remark;
+    private String rejectReasonCode;
+    private String rejectReasonDetail;
     private LocalDateTime createTime;
 
     public static DeliveryRecordVO from(DeliveryRecord r, String taskNo, LocalDate deliveryDate,
@@ -53,6 +55,8 @@ public class DeliveryRecordVO implements Serializable {
         vo.setSignTime(r.getSignTime());
         vo.setSignPerson(r.getSignPerson());
         vo.setRemark(r.getRemark());
+        vo.setRejectReasonCode(r.getRejectReasonCode());
+        vo.setRejectReasonDetail(r.getRejectReasonDetail());
         vo.setCreateTime(r.getCreateTime());
         return vo;
     }

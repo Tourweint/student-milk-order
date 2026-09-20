@@ -5,6 +5,32 @@
     <view class="welcome-sub">为孩子挑选健康营养的学生奶</view>
   </view>
 
+  <!-- 剩余待配送 -->
+  <view class="card pending-card" wx:if="{{pendingLoaded}}">
+    <view class="pending-main">
+      <text class="pending-label">剩余待配送</text>
+      <text class="pending-tip">{{pendingQuantity > 0 ? '含配送中，不含已取消与拒收' : '已全部送达，或暂无在途订单'}}</text>
+    </view>
+    <view class="pending-right">
+      <text wx:if="{{pendingQuantity > 0}}" class="pending-value">共 <text class="text-price">{{pendingQuantity}}</text> 盒</text>
+      <text wx:else class="pending-value">暂无待配送</text>
+      <text wx:if="{{nextDeliveryDate}}" class="pending-next">下次配送 {{nextDeliveryDate}}</text>
+    </view>
+  </view>
+
+  <!-- 近期拒收（仅真拒收；退订/缺货取消不会出现在这里） -->
+  <view class="card" wx:if="{{recentRejects.length}}">
+    <view class="card-title">近期拒收</view>
+    <view class="reject-item" wx:for="{{recentRejects}}" wx:key="recordId">
+      <view class="reject-main">
+        <text class="reject-product">{{item.productName || '奶品'}}</text>
+        <text class="reject-reason">{{item.reasonText}}</text>
+      </view>
+      <text class="reject-date">{{item.deliveryDate}}</text>
+    </view>
+    <view class="reject-note">拒收的奶已由系统安排次日补送，可在配送记录中查看</view>
+  </view>
+
   <!-- 套餐区 -->
   <view class="card" wx:if="{{packages.length}}">
     <view class="card-title">优惠套餐</view>

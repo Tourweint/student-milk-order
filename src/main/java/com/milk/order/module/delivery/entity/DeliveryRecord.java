@@ -38,4 +38,10 @@ public class DeliveryRecord extends BaseEntity {
 
     /** 备注 */
     private String remark;
+
+    /** 拒收原因分类：DAMAGED/SOUR/WRONG_PRODUCT/SHORTAGE/OTHER（仅真拒收写入，退订/缺货取消不写） */
+    private String rejectReasonCode;
+
+    /** 拒收详细描述（班主任填写，可选） */
+    private String rejectReasonDetail;
 }
