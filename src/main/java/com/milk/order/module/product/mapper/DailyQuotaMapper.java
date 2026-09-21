@@ -24,4 +24,22 @@ public interface DailyQuotaMapper extends BaseMapper<DailyQuota> {
     @Select("SELECT * FROM daily_quota WHERE quota_date = #{quotaDate} AND product_id = #{productId} "
             + "AND deleted = 0 FOR UPDATE")
     DailyQuota selectForUpdate(@Param("quotaDate") LocalDate quotaDate, @Param("productId") Long productId);
+
+    /**
+     * 某品种在日期区间内的**未售额度**合计：{@code Σ GREATEST(total_quota − used_quota, 0)}。
+     *
+     * <p>逐池取 {@code GREATEST(..., 0)} 而不是先求和再截断：补送加量（
+     * {@code addCompensationBox}，不校验上限）可能让某池的 {@code used > total}，
+     * 若让它去冲抵同品种其它池子的剩余，会把"可卖额度"算少、进而让发行校验误拒。
+     * 这与 {@code DailyQuotaServiceImpl.remaining} 的逐池 {@code Math.max(0, ...)} 口径一致。</p>
+     *
+     * <p>区间由调用方给（发行封顶 R5′ / 短交预警按 {@code QuotaConstants.SHELF_DAYS} 计算），
+     * Mapper 不自己拼窗口——窗口只能有一个定义。</p>
+     */
+    @Select("SELECT IFNULL(SUM(GREATEST(total_quota - IFNULL(used_quota, 0), 0)), 0) FROM daily_quota "
+            + "WHERE product_id = #{productId} AND quota_date BETWEEN #{startDate} AND #{endDate} "
+            + "AND deleted = 0")
+    Integer sumRemainingInWindow(@Param("productId") Long productId,
+                                 @Param("startDate") LocalDate startDate,
+                                 @Param("endDate") LocalDate endDate);
 }

@@ -207,6 +207,71 @@
           />
         </div>
       </el-tab-pane>
+
+      <!-- 仓库余量（供给侧）：收货点数登记 + 当前余量。余量是机动配额的上限，未登记则当天设不了配额 -->
+      <el-tab-pane label="仓库余量" name="warehouse">
+        <el-alert
+          type="info"
+          :closable="false"
+          class="warehouse-tip"
+          title="仓库余量是机动配额发行的上限（只有仓库余量才能卖）"
+          description="每天收货点数后按品种登记到货；未登记则余量为 0、管理员当天设不了机动配额。同一品种当天第二车请填写各自的送货单号作为凭证号。"
+        />
+        <el-form :inline="true" class="sub-toolbar" :model="receiptForm">
+          <el-form-item label="到货日期">
+            <el-date-picker
+              v-model="receiptForm.bizDate"
+              type="date"
+              value-format="YYYY-MM-DD"
+              :clearable="false"
+              class="date-item"
+            />
+          </el-form-item>
+          <el-form-item label="奶品">
+            <el-select v-model="receiptForm.productId" placeholder="选择奶品" filterable class="order-item">
+              <el-option
+                v-for="p in balanceList"
+                :key="p.productId"
+                :label="`${p.productName || '奶品' + p.productId}（余量 ${p.balance}）`"
+                :value="p.productId"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="到货盒数">
+            <el-input-number v-model="receiptForm.quantity" :min="1" :step="1" controls-position="right" class="num-item" />
+          </el-form-item>
+          <el-form-item label="凭证号">
+            <el-input v-model="receiptForm.receiptNo" placeholder="默认 MAIN；第二车填送货单号" class="order-item" />
+          </el-form-item>
+          <el-form-item label="批次号">
+            <el-input v-model="receiptForm.batchNo" placeholder="可选（召回反查用）" class="order-item" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="receiptSubmitting" @click="submitReceipt">登记到货</el-button>
+            <el-button @click="fetchBalance">刷新余量</el-button>
+          </el-form-item>
+        </el-form>
+
+        <el-table v-loading="balanceLoading" :data="balanceList" stripe>
+          <el-table-column prop="productId" label="奶品ID" width="90" />
+          <el-table-column label="奶品" min-width="150">
+            <template #default="{ row }">{{ row.productName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="当前余量（盒）" width="140" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.balance > 0 ? 'success' : 'danger'" size="small">{{ row.balance }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="提示" min-width="220">
+            <template #default="{ row }">
+              <span v-if="row.balance <= 0" class="warehouse-warn">
+                余量为 0：请先登记到货，否则当天无法设置该品种的机动配额
+              </span>
+              <span v-else class="warehouse-muted">送出即出库（签收不记账）；拒收退回自动增加余量</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -220,6 +285,7 @@ import {
   batchStartDeliveryTasks, startDeliveryTask,
   reportUndelivered, getUndeliveredReportList, handleUndeliveredReport
 } from '@/api/delivery'
+import { getWarehouseBalance, receiptWarehouse } from '@/api/warehouse'
 import { useUserStore } from '@/stores/user'
 
 /** 某配送日期按班级汇总（后端 /delivery/task/summary） */
@@ -303,6 +369,18 @@ const reportQuery = reactive({
 })
 
 const dispatching = ref(false)
+
+/** 仓库余量（供给侧）：到货登记 + 当前余量。余量是机动配额的上限，未登记则设不了配额 */
+const balanceLoading = ref(false)
+const balanceList = ref<{ productId: number; productName: string | null; balance: number }[]>([])
+const receiptSubmitting = ref(false)
+const receiptForm = reactive({
+  bizDate: today(),
+  productId: undefined as number | undefined,
+  quantity: 1,
+  receiptNo: '',
+  batchNo: ''
+})
 
 const taskStatusOptions = [
   { value: 1, label: '待配送' },
@@ -474,6 +552,55 @@ function refresh() {
   fetchTasks()
   fetchReports()
   fetchPendingReportTotal()
+  fetchBalance()
+}
+
+/** 仓库余量（按品种） */
+async function fetchBalance() {
+  balanceLoading.value = true
+  try {
+    const res: any = await getWarehouseBalance()
+    balanceList.value = res.data || []
+  } finally {
+    balanceLoading.value = false
+  }
+}
+
+/**
+ * 登记到货（收货点数）。
+ * 短交预警只提示、不阻断——企业可能分批到货，第二车填各自送货单号即可。
+ */
+async function submitReceipt() {
+  if (!receiptForm.productId) {
+    ElMessage.warning('请选择奶品')
+    return
+  }
+  if (!receiptForm.quantity || receiptForm.quantity < 1) {
+    ElMessage.warning('请填写到货盒数')
+    return
+  }
+  receiptSubmitting.value = true
+  try {
+    const res: any = await receiptWarehouse({
+      bizDate: receiptForm.bizDate,
+      productId: receiptForm.productId,
+      quantity: receiptForm.quantity,
+      receiptNo: receiptForm.receiptNo.trim() || undefined,
+      batchNo: receiptForm.batchNo.trim() || undefined
+    })
+    const warning = res?.data?.warning
+    if (warning) {
+      ElMessageBox.alert(warning, '短交预警（登记已成功）', { confirmButtonText: '知道了', type: 'warning' })
+    } else {
+      ElMessage.success(`已登记到货，当前余量 ${res?.data?.balance ?? 0} 盒`)
+    }
+    receiptForm.quantity = 1
+    receiptForm.receiptNo = ''
+    receiptForm.batchNo = ''
+    fetchBalance()
+  } finally {
+    receiptSubmitting.value = false
+  }
 }
 
 /** 今日已送出：批量开始当日配送，之后相关订单不可退订 */
@@ -531,8 +658,13 @@ onMounted(refresh)
 }
 .sub-toolbar {
   .date-item { width: 260px; }
+  .num-item { width: 130px; }
   .tip { color: var(--el-text-color-secondary); font-size: 12px; }
 }
+/* 仓库余量：未登记到货的品种用红色提示（它直接决定当天能不能设配额） */
+.warehouse-tip { margin-bottom: 12px; }
+.warehouse-warn { color: var(--el-color-danger); font-size: 13px; }
+.warehouse-muted { color: var(--el-text-color-secondary); font-size: 13px; }
 .summary-table { margin-bottom: 8px; }
 .pending-bar {
   display: flex;

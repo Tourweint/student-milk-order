@@ -70,7 +70,7 @@ school-ui/src/
   views/        # 按业务模块组织的页面
 ```
 
-后端按业务模块组织，目前包括 `auth`、`user`、`clazz`、`product`、`order`、`delivery`、`nutrition`、`stats`、`system`、`refund`（退款域：退款单父过程 + 毕业清算）。新模块须先确认它属于项目既定范围，不能仅因实现方便而创建。
+后端按业务模块组织，目前包括 `auth`、`user`、`clazz`、`product`、`order`、`delivery`、`nutrition`、`stats`、`system`、`refund`（退款域：退款单父过程 + 毕业清算）、`warehouse`（供给侧：仓库余量台账 + 配额发行封顶）。新模块须先确认它属于项目既定范围，不能仅因实现方便而创建。
 
 `process/` 与 `reliability/` 是**横切机制层**，不是业务模块，禁止在其中反向依赖任何业务 Service。
 
@@ -130,6 +130,18 @@ school-ui/src/
   单日合并上限 3 盒，超限继续向前找未满的有效工作日。业务规则见 `docs/研发规范/项目开发规范.md` §5.4.2，
   机制细节见 `docs/基线文档/可靠性设计.md` §十四，设计取舍见
   `docs/设计方案/2026-09-20-周末停送与调休例外-设计方案.md` §11。
+- **仓库余量与出库边界（供给侧）**：`warehouse_ledger` 是**一条进出账**（`IN/OUT/IN_BACK/ADJ/INIT`），
+  恒等式 `W(品种) = Σ(IN, IN_BACK, INIT) + ΣADJ(带符号) − ΣOUT`，任何时刻 `W ≥ 0`；台账**只增不改**
+  （与 `process_transition_log` 同原则，记错走反向 `ADJ` 冲销）。三条硬约束：① **出库时点 = 送出**
+  （任务 `1→2`，单条与批量**共用** `casDispatch` 收口，钩子只挂批量会漏账）；② **退回钩子只挂用户入口
+  `rejectRecord`**，禁止挂共享助手 `markRecordRejected`（缺货取消/退订也走它，挂错会凭空多记退回）；
+  ③ **机动配额的发行被仓库实物封顶（R5′）**：`Σ_{池: quota_date∈[D−2,D]} (total−used) + Σ_{任务: status=1 且 delivery_date ≤ D} ≤ W`，
+  发行事务内先锁 `product` 行使同品种发行串行；窗口必须复用 `QuotaConstants.SHELF_DAYS`（不得另立）。
+  新增跨表约束登记为 `ProcessInvariant`（当前 4 条：`INV_LEDGER_OUT_TASK` / `INV_WAREHOUSE_NONNEG` /
+  `INV_LEDGER_REFUND_LINK` / `INV_WAREHOUSE_COVERAGE`）；**出库判据必须是 `dispatch_time` 而不是任务状态**
+  （`4-已取消` 是多来源终态，按状态判会让体检补写出假出库行、把 W 打成负数）。业务规则见
+  `docs/研发规范/项目开发规范.md` §5.9，机制见 `docs/基线文档/可靠性设计.md` §十八，设计取舍见
+  `docs/设计方案/2026-09-21-仓库余量与出库边界-设计方案.md`（口径以该文 §11 评审修订为准）。
 - **退款与毕业清算（退款域）**：退款单是**挂在订单旁侧的资金过程**，订单状态零新增（作废期次后由既有聚合出口收敛）。
   三条硬约束：① **先抢履约、再计价、后动资金**——逐条 `attempt(TASK_CANCEL)` 作废期次、只认返回 true 的集合计价，
   资金侧推进（2→3）用 `require`（`attempt` 在规则停用时静默不写台账）；② 金额分母用
@@ -174,7 +186,7 @@ school-ui/src/
 ```powershell
 # 后端（仓库根目录）
 mvn clean compile
-mvn test                       # 含 15 组并发/幂等/异常恢复/多实例/混沌/长稳/性能/平移补送/退款清算实验 + 契约矩阵测试（需先准备实验库）
+mvn test                       # 含 20 组并发/幂等/异常恢复/多实例/混沌/长稳/性能/平移补送/退款清算/仓库台账实验 + 契约矩阵测试（69 用例，需先准备实验库）
 mvn spring-boot:run
 
 # 前端

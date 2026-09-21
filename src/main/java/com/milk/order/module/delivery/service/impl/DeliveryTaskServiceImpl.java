@@ -52,6 +52,7 @@ import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.service.DataScopeResolver;
+import com.milk.order.module.warehouse.service.WarehouseService;
 import com.milk.order.process.ProcessTransitionExecutor;
 import com.milk.order.process.TransitionSpec;
 import com.milk.order.process.pending.ProcessPendingTaskService;
@@ -93,6 +94,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final IdempotencyGuard idempotencyGuard;
     private final DailyQuotaService dailyQuotaService;
     private final ProcessPendingTaskService pendingTaskService;
+    /** 仓库余量台账（供给侧）：任务送出记 OUT、拒收记 IN_BACK，均与本类的事务同提交 */
+    private final WarehouseService warehouseService;
     private final DeliveryCompensationMapper deliveryCompensationMapper;
     private final DeliveryExceptionMapper deliveryExceptionMapper;
     /** 未送达申报（自动签收兜底必须排除被申报的任务，避免把"没送到"签成"已签收"） */
@@ -353,6 +356,8 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         DeliveryTask task = getTask(taskId);
         // 过程层严格迁移：规则禁止（如已完成任务）抛异常，CAS 与并发批量送出竞争失败也抛异常
         processTransitionExecutor.require(dispatchSpec(task), () -> casDispatch(task));
+        // 送出即出库：状态抢占成功后才记 OUT（同一事务）——落败方在上面已抛异常，不会入账
+        recordOutStock(task);
         // 与批量口径保持一致：单条送出同样要联动订单已支付→配送中。
         // 原先单条路径缺这一步，会让订单停在已支付而子任务已在配送中——正是父状态漂移的一类来源，
         // 修复后由兜底通道仍可发现并纠正，但正常路径就不该产生漂移。
@@ -389,6 +394,9 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
             // 过程层宽松迁移：并发重复点击/批量与单条撞车时仅一方生效，更新失败按幂等跳过
             if (processTransitionExecutor.attempt(dispatchSpec(task), () -> casDispatch(task))) {
                 dispatched++;
+                // 送出即出库（仓库台账 OUT，同一事务）：只有本轮真正抢到状态的一方入账，
+                // 重复批量送出由 uk_biz_ref 兜底（一个任务只出一次库）
+                recordOutStock(task);
             }
             // 无论本轮是否由本请求送出，该订单都应联动进入配送中（订单侧幂等）
             orderIds.add(task.getOrderId());
@@ -429,6 +437,24 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                 .set(DeliveryTask::getDispatchBy, SecurityUtils.getCurrentUsername())
                 .set(DeliveryTask::getDispatchTime, LocalDateTime.now())
                 .update();
+    }
+
+    /**
+     * 任务送出即出库（仓库台账 OUT，与状态迁移同一事务）。
+     *
+     * <p><b>为什么挂在这里：</b>单条 {@link #startDelivery} 与批量 {@link #batchStartDelivery}
+     * 走的是同一个 {@code casDispatch}（同一状态机收口）——钩子只挂批量会让**单条送出全部漏账**。
+     * 因此两处 CAS 成功后都调用本方法，口径只在这里定义一次。</p>
+     *
+     * <p><b>出库时点为什么是"送出"而不是签收：</b>物理移动发生在"仓库 → 领取点"，
+     * 签收是消费确认。两者分开，"拒收退回"的账才有解释（见设计方案 §10 决策 3）。</p>
+     *
+     * <p>{@code biz_date} 取任务配送日期（业务日账，补登过去日期不会错位）；
+     * 实际送出时刻由 {@code dispatch_time} 记录。幂等由 {@code uk_biz_ref} 仲裁。</p>
+     */
+    private void recordOutStock(DeliveryTask task) {
+        warehouseService.recordOutStock(task.getId(), task.getProductId(), task.getDeliveryDate(),
+                task.getQuantity() == null ? 0 : task.getQuantity());
     }
 
     /** 任务状态的通用 CAS 条件更新：以 fromStatus 为条件推进到 toStatus */
@@ -989,6 +1015,13 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
                         .set(DeliveryRecord::getRemark, rejectReason)
                         .set(finalReasonCode != null, DeliveryRecord::getRejectReasonCode, finalReasonCode)
                         .set(finalReasonDetail != null, DeliveryRecord::getRejectReasonDetail, finalReasonDetail)) > 0);
+        // 拒收即回仓（仓库台账 IN_BACK，同一事务）：奶被带回学校即入账。
+        // 钩子只挂本方法（用户入口）——任务作废联动的 markRecordRejected 也会把未签收记录
+        // 置为 sign_status=3，挂在那个共享助手上会让缺货取消/退订凭空多记退回
+        // （奶根本没被拒收），并让 INV_LEDGER_REFUND_LINK 的"真拒收"判据失去意义
+        warehouseService.recordInBack(record.getId(), record.getProductId(), LocalDate.now(),
+                record.getQuantity() == null ? 0 : record.getQuantity(), rejectReason);
+
         task.setStatus(4); // 已取消
 
         // 拒收补送：同一事务内先落补送，再做完成判定（顺序不可颠倒，见方案 §2.1 ⑧）

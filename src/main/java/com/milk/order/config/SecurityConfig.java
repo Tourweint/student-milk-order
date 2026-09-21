@@ -99,6 +99,13 @@ public class SecurityConfig {
                 // 毕业清算（涉资金）：独立命名空间，仅管理员
                 // ——刻意不复用 /api/clazz/**（ADMIN+TEACHER），避免班级管理角色顺带获得清算权限
                 .antMatchers("/api/student/**").hasRole("ADMIN")
+                // 仓库余量台账（供给侧）：到货登记与余量查询 = 配送站 + 管理员（收货点数是配送站的日常动作）；
+                // 台账查询与修正 = 仅管理员（修正直接改余量、进而改配额发行上限，属管理员职责）；
+                // 家长与班主任不接触仓库（设计方案 R10）
+                .antMatchers(HttpMethod.POST, "/api/warehouse/receipt").hasAnyRole("ADMIN", "DELIVERY")
+                .antMatchers(HttpMethod.GET, "/api/warehouse/balance").hasAnyRole("ADMIN", "DELIVERY")
+                .antMatchers(HttpMethod.GET, "/api/warehouse/ledger").hasRole("ADMIN")
+                .antMatchers("/api/warehouse/**").hasRole("ADMIN")
                 // 其余接口需认证：奶品/营养 GET 等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()

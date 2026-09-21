@@ -3,6 +3,7 @@ package com.milk.order.module.product.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.milk.order.common.constant.QuotaConstants;
 import com.milk.order.exception.BusinessException;
 import com.milk.order.module.product.dto.DailyQuotaBatchRequest;
 import com.milk.order.module.product.dto.QuotaDeductItem;
@@ -16,6 +17,7 @@ import com.milk.order.module.product.mapper.ProductBatchMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.vo.QuotaVO;
+import com.milk.order.module.warehouse.service.WarehouseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -57,13 +59,18 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
      * <p>语义校正（2026-09-21）：本参数是商务约定的"计划顺延窗口"（与奶站合同定），
      * 不是牛奶物理保质期——本项目配送常温奶，实际保质期六个月。当前取值 3 为既有业务约定，
      * 行为不变；批次追溯钩子见 docs/论文/后续扩展方案.md §4.7。</p>
+     *
+     * <p>取值来自 {@link QuotaConstants#SHELF_DAYS}（**唯一来源**）：仓库侧的发行封顶 R5′
+     * 与短交预警的池口径必须与本窗口完全一致，否则会出现"扣减说能卖、封顶说不能"的静默错账。</p>
      */
-    private static final int SHELF_DAYS = 3;
+    private static final int SHELF_DAYS = QuotaConstants.SHELF_DAYS;
 
     private final DailyQuotaUsageMapper dailyQuotaUsageMapper;
     private final ProductMapper productMapper;
     /** 仅用于校验批次标注的品种一致性（批次追溯钩子），不参与扣减/结转逻辑 */
     private final ProductBatchMapper productBatchMapper;
+    /** 仓库余量封顶（R5′）：额度发行的物理地基，见 {@code WarehouseService.requireIssuanceCoverage} */
+    private final WarehouseService warehouseService;
 
     @Override
     public List<QuotaVO> listRange(LocalDate startDate, LocalDate endDate) {
@@ -113,6 +120,18 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
             String batchNo = resolveBatchNo(item);
             // 同样走行锁读取：本方法也是“读-改-写”，必须与并发扣减保持同一套并发语义
             DailyQuota existing = baseMapper.selectForUpdate(quotaDate, item.getProductId());
+            int used = existing == null || existing.getUsedQuota() == null ? 0 : existing.getUsedQuota();
+            if (existing != null && used > item.getTotalQuota()) {
+                Product p = productMapper.selectById(item.getProductId());
+                String name = p == null ? "奶品" + item.getProductId() : p.getProductName();
+                throw new BusinessException("「" + name + "」当日已售 " + used + " 盒，新配额不能小于已售数");
+            }
+            // 仓库余量封顶（R5′）：额度发行被仓库实物封顶——"只有仓库余量才能卖"。
+            // 校验走 WarehouseService（口径唯一出口），并在事务内锁 product 行使同品种发行串行；
+            // 放行之后，支付扣减路径无需再查仓库（不新增热点行）。
+            // 不登记到货则 W=0，这里显式失败而不是静默放行：显式失败优于静默。
+            warehouseService.requireIssuanceCoverage(item.getProductId(), quotaDate,
+                    item.getTotalQuota(), used);
             if (existing == null) {
                 DailyQuota quota = new DailyQuota();
                 quota.setQuotaDate(quotaDate);
@@ -123,12 +142,6 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                 quota.setRemark(remark);
                 save(quota);
             } else {
-                int used = existing.getUsedQuota() == null ? 0 : existing.getUsedQuota();
-                if (used > item.getTotalQuota()) {
-                    Product p = productMapper.selectById(item.getProductId());
-                    String name = p == null ? "奶品" + item.getProductId() : p.getProductName();
-                    throw new BusinessException("「" + name + "」当日已售 " + used + " 盒，新配额不能小于已售数");
-                }
                 existing.setTotalQuota(item.getTotalQuota());
                 // 批次只是池子上的可选标注：整体提交当日各行，故按传入值覆盖（为空即清除标注）
                 existing.setBatchNo(batchNo);

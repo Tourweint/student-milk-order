@@ -83,6 +83,7 @@ const menuList: { path: string; title: string; icon: string; roles?: string[] }[
   { path: '/clazz', title: '班级管理', icon: 'OfficeBuilding', roles: ['ADMIN', 'TEACHER'] },
   { path: '/student', title: '学生管理', icon: 'Avatar', roles: ['ADMIN', 'TEACHER'] },
   { path: '/product', title: '奶品管理', icon: 'Goods', roles: ['ADMIN'] },
+  { path: '/warehouse', title: '仓库台账', icon: 'Files', roles: ['ADMIN'] },
   { path: '/order', title: '订单管理', icon: 'List', roles: ['ADMIN', 'TEACHER'] },
   { path: '/refund', title: '退款管理', icon: 'Money', roles: ['ADMIN'] },
   { path: '/delivery-station', title: '配送站面板', icon: 'Box', roles: ['ADMIN', 'DELIVERY'] },

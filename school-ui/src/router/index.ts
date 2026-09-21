@@ -47,6 +47,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '奶品管理', icon: 'Goods', roles: ['ADMIN'] }
       },
       {
+        path: 'warehouse',
+        name: 'WarehouseLedger',
+        component: () => import('@/views/warehouse/WarehouseLedger.vue'),
+        meta: { title: '仓库台账', icon: 'Files', roles: ['ADMIN'] }
+      },
+      {
         path: 'order',
         name: 'OrderManage',
         component: () => import('@/views/order/OrderManage.vue'),

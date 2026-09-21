@@ -674,3 +674,41 @@ CREATE TABLE IF NOT EXISTS process_pending_task (
     UNIQUE KEY uk_pending (scene, entity_id, trigger_action, status),
     KEY idx_status_next (status, next_retry_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='过程自愈待办（实时通道）';
+
+-- ============================================================
+-- 11. 供给侧：仓库余量台账（warehouse_ledger）
+-- ============================================================
+-- 履约链起点是"奶企 → 学校配送站（收货）→ 公共领取点 → 班级/学生"，
+-- 而配额池建模的是"供货计划"，与物理世界之间原本没有对账通道。本表补上这条通道：
+--   W(品种) = ΣIN + ΣIN_BACK + ΣINIT + ΣADJ(带符号) − ΣOUT      —— 任何时刻 W ≥ 0
+-- 语义边界（重要）：
+--   ① 这不是库存/ERP：单表一条进出账，只回答"还有多少盒可卖"，不做效期、先进先出、盘点、库位；
+--   ② 台账只增不改（与 process_transition_log 同一原则）：记错走反向 ADJ 冲销，两条留痕；
+--   ③ 出库时点 = 「今日已送出」(batch-start)，不是签收——物理移动发生在仓库→领取点；
+--   ④ OUT 的 biz_date 取 task.delivery_date（业务日账），实际送出时刻看 delivery_task.dispatch_time。
+-- 设计依据：docs/设计方案/2026-09-21-仓库余量与出库边界-设计方案.md（口径以该文 §11 评审修订为准）
+CREATE TABLE IF NOT EXISTS warehouse_ledger (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '台账ID',
+    biz_type VARCHAR(12) NOT NULL COMMENT '账目类型：IN-到货(人工登记) / OUT-送出(自动,挂任务) / IN_BACK-退回(自动,拒收触发) / ADJ-修正(人工,带符号) / INIT-期初',
+    biz_date DATE NOT NULL COMMENT '业务日期：IN=到货日；OUT=任务配送日期；IN_BACK=拒收日；ADJ/INIT=登记日',
+    product_id BIGINT NOT NULL COMMENT '奶品ID（按品种独立记账，不混账）',
+    quantity INT NOT NULL COMMENT '盒数：IN/OUT/IN_BACK/INIT 恒为正（方向由 biz_type 表达）；ADJ 带符号（正=增加余量，负=减少余量）',
+    ref_type VARCHAR(30) COMMENT '关联对象类型：OUT=delivery_task / IN_BACK=delivery_record；其余为空',
+    ref_id BIGINT COMMENT '关联对象ID（OUT/IN_BACK 的幂等业务键）',
+    receipt_no VARCHAR(64) COMMENT '到货凭证号：IN 必填（首行 MAIN、第二车填送货单号）；INIT 固定 INIT；其余为空',
+    batch_no VARCHAR(64) COMMENT '可选：到货批次号（批次追溯钩子的数据来源，不参与任何流转）',
+    reason VARCHAR(255) COMMENT 'ADJ/IN_BACK 必填（修正原因/拒收原因）；IN 可填供应商与送货单号',
+    operator VARCHAR(64) COMMENT '操作人（自动入账记 system）',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    -- OUT / IN_BACK 的业务幂等键：一个任务只出一次库、一条签收记录只退回一次。
+    -- 合并成一条键：biz_type 不同的两行 ref_id 空间互不干扰（任务ID 与记录ID 会撞号）；
+    -- IN/ADJ/INIT 行的 ref_id 为 NULL，MySQL/MariaDB 唯一索引允许多个 NULL，故互不约束。
+    UNIQUE KEY uk_biz_ref (biz_type, ref_id),
+    -- IN / INIT 的幂等键：到货登记双击、迁移脚本重跑都必须只落一行。
+    -- 分批到货（同日同品种第二车）用不同 receipt_no 合法新增，仍是"显式登记"而非"偷偷补行"。
+    UNIQUE KEY uk_in_receipt (biz_type, biz_date, product_id, receipt_no),
+    KEY idx_product_date (product_id, biz_date),
+    KEY idx_biz_type_date (biz_type, biz_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='仓库余量台账（一条进出账：到货/送出/退回/修正/期初）';

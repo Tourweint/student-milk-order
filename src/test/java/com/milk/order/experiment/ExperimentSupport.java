@@ -53,12 +53,24 @@ public abstract class ExperimentSupport {
     /** 实验用单价（元） */
     protected static final BigDecimal UNIT_PRICE = new BigDecimal("3.00");
 
+    /**
+     * 夹具品种的期初仓库余量（盒）。
+     *
+     * <p>2026-09-21 起"送出"会在同一事务内自动记 {@code OUT} 出库（仓库台账），
+     * 若仓库没有货，W 会被打成负数并让 {@code INV_WAREHOUSE_NONNEG} /
+     * {@code INV_WAREHOUSE_COVERAGE} 在**健康状态基线**里误报——而实验七/十/十一都断言
+     * "健康态零检出"。因此夹具统一给一笔充裕的期初库存；
+     * 需要精确控制余量的用例（如发行封顶）请自行造一个品种，
+     * 见 {@code ExperimentSupport.seedWarehouseStock} 与实验二十。</p>
+     */
+    protected static final int FIXTURE_WAREHOUSE_STOCK = 1_000_000;
+
     private static final AtomicLong ORDER_SEQ = new AtomicLong(1);
 
     /** 实验结束后需要清空的业务表（保留 state_transition_rule / sys_config / process_reconcile_rule 种子数据） */
     private static final List<String> CLEAN_TABLES = List.of(
             "nutrition_intake", "delivery_compensation", "delivery_exception", "delivery_undelivered_report",
-            "delivery_parent_exemption", "delivery_record", "delivery_task",
+            "delivery_parent_exemption", "delivery_record", "delivery_task", "warehouse_ledger",
             "daily_quota_usage", "daily_quota", "product_batch", "payment_record", "refund_order",
             "order_item", "order_info", "process_transition_log",
             "process_pending_task", "process_invariant_violation", "wechat_pay_order",
@@ -115,6 +127,10 @@ public abstract class ExperimentSupport {
         jdbcTemplate.update("INSERT INTO product (product_name, category_id, spec, price, status, sort, deleted) VALUES (?, ?, '250ml', ?, 1, 0, 0)",
                 TAG + "奶", categoryId, UNIT_PRICE);
         productId = id("SELECT id FROM product WHERE product_name = ?", TAG + "奶");
+
+        // 仓库余量（供给侧）：送出会自动记 OUT 出库，故夹具必须先有货，否则 W 变负会让
+        // 健康态基线出现 INV_WAREHOUSE_* 误报（详见 FIXTURE_WAREHOUSE_STOCK 注释）
+        seedWarehouseStock(productId, FIXTURE_WAREHOUSE_STOCK);
     }
 
     @AfterEach
@@ -131,6 +147,21 @@ public abstract class ExperimentSupport {
     protected void setQuota(LocalDate date, int total) {
         jdbcTemplate.update("INSERT INTO daily_quota (quota_date, product_id, total_quota, used_quota, remark, deleted) VALUES (?, ?, ?, 0, ?, 0)",
                 date, productId, total, TAG);
+    }
+
+    /**
+     * 登记仓库余量（{@code warehouse_ledger} 的 {@code INIT} 行）。
+     *
+     * <p>{@link #setQuota} 直接 INSERT 配额池，绕过发行入口，因此既有实验不需要本步骤；
+     * 但**凡是要走 `DailyQuotaService.setQuotaBatch`（发行封顶 R5′）的用例，必须先有仓库余量**——
+     * 否则 W=0，设置配额一定被拒绝。本方法按"同日同品种同凭证号"幂等（可重复调用）。</p>
+     */
+    protected void seedWarehouseStock(long productId, int boxes) {
+        jdbcTemplate.update("INSERT INTO warehouse_ledger "
+                + "(biz_type, biz_date, product_id, quantity, receipt_no, reason, operator, deleted) "
+                + "VALUES ('INIT', CURDATE(), ?, ?, 'INIT', ?, 'system', 0) "
+                + "ON DUPLICATE KEY UPDATE quantity = VALUES(quantity)",
+                productId, boxes, TAG);
     }
 
     /** 读取某日某品种已消耗配额 */
