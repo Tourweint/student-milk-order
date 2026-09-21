@@ -57,8 +57,9 @@ public abstract class ExperimentSupport {
 
     /** 实验结束后需要清空的业务表（保留 state_transition_rule / sys_config / process_reconcile_rule 种子数据） */
     private static final List<String> CLEAN_TABLES = List.of(
-            "nutrition_intake", "delivery_compensation", "delivery_exception", "delivery_record", "delivery_task",
-            "daily_quota_usage", "daily_quota", "payment_record",
+            "nutrition_intake", "delivery_compensation", "delivery_exception", "delivery_undelivered_report",
+            "delivery_parent_exemption", "delivery_record", "delivery_task",
+            "daily_quota_usage", "daily_quota", "product_batch", "payment_record", "refund_order",
             "order_item", "order_info", "process_transition_log",
             "process_pending_task", "process_invariant_violation", "wechat_pay_order",
             "student", "class_info", "product", "product_category", "grade");

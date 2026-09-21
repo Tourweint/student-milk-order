@@ -29,3 +29,11 @@ application-local.yml
 
 # 微信开发者工具私有配置
 miniprogram/project.private.config.json
+
+# OpenClaw / AutoClaw agent 专用文件（软件自动生成与维护，与项目无关）
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+.openclaw/

@@ -76,12 +76,29 @@ public class SecurityConfig {
                 .antMatchers(HttpMethod.GET, "/api/delivery/task/pending-quantity").hasRole("PARENT")
                 // 家长端首页聚合（剩余盒数 + 下次配送日 + 近期拒收）：同样仅家长
                 .antMatchers(HttpMethod.GET, "/api/delivery/task/parent-home").hasRole("PARENT")
+                // 家长端「当日豁免」：仅家长；数据范围在 Service 层强制为本人绑定学生，
+                // 且只允许豁免"今天 + 尚未送出（待配送）"的任务
+                .antMatchers(HttpMethod.GET, "/api/delivery/task/parent-exemption").hasRole("PARENT")
+                .antMatchers(HttpMethod.POST, "/api/delivery/task/parent-exempt-today").hasRole("PARENT")
+                // 奶站「当日未送达申报」：配送站与管理员可申报（只打标记与待办，不改任何任务/订单状态）
+                .antMatchers(HttpMethod.POST, "/api/delivery/task/undelivered-report").hasAnyRole("ADMIN", "DELIVERY")
+                // 申报跟进（关闭待办）：仅管理员；跟进只写说明，实际处置走既有签收/拒收/取消出口
+                .antMatchers(HttpMethod.PUT, "/api/delivery/task/undelivered-report/**").hasRole("ADMIN")
                 .antMatchers("/api/delivery/task/**").hasAnyRole("ADMIN", "TEACHER", "DELIVERY")
                 .antMatchers(HttpMethod.POST, "/api/delivery/record/**").hasAnyRole("ADMIN", "TEACHER")
                 // 完成订单仅管理端角色（订单已无独立"开始配送"入口，配送中由配送任务联动触发）
                 .antMatchers(HttpMethod.PUT, "/api/order/complete/**").hasAnyRole("ADMIN", "TEACHER")
                 // 订单数据仅学校侧角色与家长可见（配送站按任务配送，不接触订单数据）
                 .antMatchers("/api/order/**").hasAnyRole("ADMIN", "TEACHER", "PARENT")
+                // 退款域：家长可申请/预览/查看本人退款单；审核、执行与全部列表仅管理员
+                // （班主任与配送站不接触退款，见设计方案 R9）
+                .antMatchers("/api/refund/list").hasRole("ADMIN")
+                .antMatchers(HttpMethod.POST, "/api/refund/order/**").hasAnyRole("ADMIN", "PARENT")
+                .antMatchers(HttpMethod.PUT, "/api/refund/**").hasRole("ADMIN")
+                .antMatchers("/api/refund/**").hasAnyRole("ADMIN", "PARENT")
+                // 毕业清算（涉资金）：独立命名空间，仅管理员
+                // ——刻意不复用 /api/clazz/**（ADMIN+TEACHER），避免班级管理角色顺带获得清算权限
+                .antMatchers("/api/student/**").hasRole("ADMIN")
                 // 其余接口需认证：奶品/营养 GET 等三端共用，数据范围由 Service 层数据权限控制
                 .anyRequest().authenticated()
                 .and()

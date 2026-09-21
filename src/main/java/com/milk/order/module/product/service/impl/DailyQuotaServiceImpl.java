@@ -9,8 +9,10 @@ import com.milk.order.module.product.dto.QuotaDeductItem;
 import com.milk.order.module.product.entity.DailyQuota;
 import com.milk.order.module.product.entity.DailyQuotaUsage;
 import com.milk.order.module.product.entity.Product;
+import com.milk.order.module.product.entity.ProductBatch;
 import com.milk.order.module.product.mapper.DailyQuotaMapper;
 import com.milk.order.module.product.mapper.DailyQuotaUsageMapper;
+import com.milk.order.module.product.mapper.ProductBatchMapper;
 import com.milk.order.module.product.mapper.ProductMapper;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.vo.QuotaVO;
@@ -30,9 +32,15 @@ import java.util.stream.Collectors;
 /**
  * 每日机动配额服务（按品种）
  *
- * 结转模型：每个品种每天管理员设置的盒数是当日"新鲜池"；当日未售完的自动结转次日继续卖（牛奶不扔），
- * 按保质期（SHELF_DAYS 天）滚动，窗口外的剩余自动作废（动态计算，无需定时任务）。
- * 扣减按品种独立进行、先卖最老的池子（最接近过期的先出），并写订单台账供退订精确回补。
+ * 结转模型：每个品种每天管理员设置的盒数是当日"新鲜池"；当日未售完的计划量在结转窗口内顺延（牛奶不扔），
+ * 按 SHELF_DAYS 天的窗口滚动，窗口外的剩余计划量作废（动态计算，无需定时任务）。
+ * 扣减按品种独立进行、先消耗最老的池子（最接近窗口到期的先出），并写订单台账供退订精确回补。
+ *
+ * <p><b>参数语义（2026-09-21 校正）</b>：SHELF_DAYS 建模的是"计划顺延窗口"——当日未售完的供货计划量
+ * 几天后不再可顺延的商务约定（由与奶站的合同定），<b>不是牛奶的物理保质期</b>（本项目配送常温奶，
+ * 实际保质期六个月）。"为业务决策建模，不为物理现实建模"：批号/批次追溯属奶站责任域，
+ * 系统仅预留钩子（见 docs/论文/后续扩展方案.md §4.7 与
+ * docs/设计方案/2026-09-21-保质期语义校正与批次追溯-设计方案.md）。</p>
  *
  * <p>并发语义（可靠性层）：扣减是“读剩余 → 写已售”的读-改-写，池子行一律经
  * {@code selectForUpdate} 加行锁后再写回，并由 {@code used_quota + n <= total_quota}
@@ -43,11 +51,19 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQuota> implements DailyQuotaService {
 
-    /** 牛奶保质期（天）：未售配额结转保留的天数窗口，窗口外自动作废 */
+    /**
+     * 计划顺延窗口（天）：当日未售完的配额计划量向后顺延的天数，窗口外作废。
+     *
+     * <p>语义校正（2026-09-21）：本参数是商务约定的"计划顺延窗口"（与奶站合同定），
+     * 不是牛奶物理保质期——本项目配送常温奶，实际保质期六个月。当前取值 3 为既有业务约定，
+     * 行为不变；批次追溯钩子见 docs/论文/后续扩展方案.md §4.7。</p>
+     */
     private static final int SHELF_DAYS = 3;
 
     private final DailyQuotaUsageMapper dailyQuotaUsageMapper;
     private final ProductMapper productMapper;
+    /** 仅用于校验批次标注的品种一致性（批次追溯钩子），不参与扣减/结转逻辑 */
+    private final ProductBatchMapper productBatchMapper;
 
     @Override
     public List<QuotaVO> listRange(LocalDate startDate, LocalDate endDate) {
@@ -75,6 +91,7 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
             vo.setProductName(p == null ? null : p.getProductName());
             vo.setTotalQuota(r.getTotalQuota());
             vo.setUsedQuota(r.getUsedQuota());
+            vo.setBatchNo(r.getBatchNo());
             vo.setRemaining(Math.max(0, r.getTotalQuota() - (r.getUsedQuota() == null ? 0 : r.getUsedQuota())));
             return vo;
         }).collect(Collectors.toList());
@@ -93,6 +110,7 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
             if (item.getTotalQuota() == null || item.getTotalQuota() < 0) {
                 throw new BusinessException("机动盒数不合法");
             }
+            String batchNo = resolveBatchNo(item);
             // 同样走行锁读取：本方法也是“读-改-写”，必须与并发扣减保持同一套并发语义
             DailyQuota existing = baseMapper.selectForUpdate(quotaDate, item.getProductId());
             if (existing == null) {
@@ -101,6 +119,7 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                 quota.setProductId(item.getProductId());
                 quota.setTotalQuota(item.getTotalQuota());
                 quota.setUsedQuota(0);
+                quota.setBatchNo(batchNo);
                 quota.setRemark(remark);
                 save(quota);
             } else {
@@ -111,12 +130,35 @@ public class DailyQuotaServiceImpl extends ServiceImpl<DailyQuotaMapper, DailyQu
                     throw new BusinessException("「" + name + "」当日已售 " + used + " 盒，新配额不能小于已售数");
                 }
                 existing.setTotalQuota(item.getTotalQuota());
+                // 批次只是池子上的可选标注：整体提交当日各行，故按传入值覆盖（为空即清除标注）
+                existing.setBatchNo(batchNo);
                 if (StringUtils.hasText(remark)) {
                     existing.setRemark(remark);
                 }
                 updateById(existing);
             }
         }
+    }
+
+    /**
+     * 解析并校验配额池上的批次标注（批次追溯钩子）。
+     *
+     * <p>刻意宽松：**不要求批号已建档**（事故当场可直接标注并反查），只在批号已建档且品种不一致时拒绝——
+     * 否则批号会被挂到别的品种的池子上，召回反查会给出串味的名单。</p>
+     */
+    private String resolveBatchNo(DailyQuotaBatchRequest.Item item) {
+        if (!StringUtils.hasText(item.getBatchNo())) {
+            return null;
+        }
+        String batchNo = item.getBatchNo().trim();
+        ProductBatch batch = productBatchMapper.selectOne(new LambdaQueryWrapper<ProductBatch>()
+                .eq(ProductBatch::getBatchNo, batchNo).last("LIMIT 1"));
+        if (batch != null && !batch.getProductId().equals(item.getProductId())) {
+            Product p = productMapper.selectById(batch.getProductId());
+            String name = p == null ? "奶品" + batch.getProductId() : p.getProductName();
+            throw new BusinessException("批号「" + batchNo + "」已登记为「" + name + "」，不能标注到其它品种的配额池上");
+        }
+        return batchNo;
     }
 
     @Override

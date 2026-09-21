@@ -10,13 +10,17 @@ import com.milk.order.module.delivery.dto.RebalanceRequest;
 import com.milk.order.module.delivery.dto.ShiftTasksRequest;
 import com.milk.order.module.delivery.dto.SignRequest;
 import com.milk.order.module.delivery.dto.StockoutCancelRequest;
+import com.milk.order.module.delivery.dto.UndeliveredReportRequest;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
+import com.milk.order.module.delivery.service.DeliveryUndeliveredReportService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.ParentExemptionVO;
 import com.milk.order.module.delivery.vo.ParentHomeVO;
 import com.milk.order.module.delivery.vo.PendingSignVO;
 import com.milk.order.module.delivery.vo.ShiftResultVO;
+import com.milk.order.module.delivery.vo.UndeliveredReportVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -43,6 +47,10 @@ import java.util.List;
  * - POST   /api/delivery/record/sign         签收（同时任务完成+生成营养摄入）
  * - POST   /api/delivery/record/batch-sign   批量签收（按日期+可选班级，班主任限本班）
  * - POST   /api/delivery/record/reject       拒收（写结构化原因，并在同事务内按订单类型落补送）
+ * - POST   /api/delivery/task/undelivered-report      奶站「当日未送达申报」（ADMIN/DELIVERY）：
+ *                                                     只打标记与待办，把该任务排除出自动签收候选集，不改任何状态
+ * - GET    /api/delivery/task/undelivered-report/list 未送达申报待跟进列表（班主任限本班）
+ * - PUT    /api/delivery/task/undelivered-report/{id}/handle 标记已跟进（仅 ADMIN；只写跟进说明，不改任务状态）
  */
 @RestController
 @RequestMapping("/api/delivery")
@@ -50,6 +58,7 @@ import java.util.List;
 public class DeliveryController {
 
     private final DeliveryTaskService deliveryTaskService;
+    private final DeliveryUndeliveredReportService undeliveredReportService;
 
     @PostMapping("/task/generate")
     public ApiResponse<Integer> generateTasks(@RequestParam String deliveryDate,
@@ -133,6 +142,22 @@ public class DeliveryController {
         return ApiResponse.success(deliveryTaskService.parentHomeOverview());
     }
 
+    /** 家长端「当日豁免」概览：今天可豁免任务数 + 本月剩余次数（仅 PARENT，数据范围为绑定学生） */
+    @GetMapping("/task/parent-exemption")
+    public ApiResponse<ParentExemptionVO> parentExemption() {
+        return ApiResponse.success(deliveryTaskService.parentExemptionOverview());
+    }
+
+    /**
+     * 家长端「当日豁免」：取消该学生今天尚未送出的待配送任务（仅 PARENT）。
+     *
+     * <p>按「学生 × 自然月」限次（默认 3，可配置）；取消走统一迁移出口留痕，零散订购配额回补原池。</p>
+     */
+    @PostMapping("/task/parent-exempt-today")
+    public ApiResponse<ParentExemptionVO> parentExemptToday(@RequestParam(required = false) String reason) {
+        return ApiResponse.success(deliveryTaskService.parentExemptToday(reason));
+    }
+
     /** 配送前缺货批量取消：取消某日期某奶品全部待配送任务（仅取消该期，不影响已完成任务） */
     @PutMapping("/task/stockout-cancel")
     public ApiResponse<Integer> stockoutCancel(@Valid @RequestBody StockoutCancelRequest request) {
@@ -144,6 +169,39 @@ public class DeliveryController {
     public ApiResponse<Void> cancelTask(@PathVariable Long id,
                                          @RequestParam(required = false) String reason) {
         deliveryTaskService.cancelTask(id, reason);
+        return ApiResponse.success();
+    }
+
+    /**
+     * 奶站「当日未送达申报」：该任务已点「已送出」但物理上没送到。
+     *
+     * <p>申报后该任务被排除出自动签收兜底候选集，并进入管理端待跟进列表；
+     * **申报本身不改任务/订单状态**，人工处置仍走既有签收/拒收/取消出口。</p>
+     */
+    @PostMapping("/task/undelivered-report")
+    public ApiResponse<Void> reportUndelivered(@Valid @RequestBody UndeliveredReportRequest request) {
+        undeliveredReportService.report(request);
+        return ApiResponse.success();
+    }
+
+    /** 未送达申报待跟进列表（班主任限本班；任务若已被人工处置，taskStatus 会反映其去向） */
+    @GetMapping("/task/undelivered-report/list")
+    public ApiResponse<PageResult<UndeliveredReportVO>> undeliveredReportList(
+            @RequestParam(defaultValue = "1") Long pageNum,
+            @RequestParam(defaultValue = "10") Long pageSize,
+            @RequestParam(required = false) String deliveryDate,
+            @RequestParam(required = false) Integer handleStatus,
+            @RequestParam(required = false) Long classId) {
+        IPage<UndeliveredReportVO> page = undeliveredReportService.pageReports(
+                pageNum, pageSize, deliveryDate, handleStatus, classId);
+        return ApiResponse.success(PageResult.of(page.getTotal(), page.getCurrent(), page.getSize(), page.getRecords()));
+    }
+
+    /** 标记已跟进：只写跟进说明与人/时间，不触碰任务状态（实际处置必须走业务出口） */
+    @PutMapping("/task/undelivered-report/{id}/handle")
+    public ApiResponse<Void> handleUndeliveredReport(@PathVariable Long id,
+                                                     @RequestParam(required = false) String remark) {
+        undeliveredReportService.handle(id, remark);
         return ApiResponse.success();
     }
 

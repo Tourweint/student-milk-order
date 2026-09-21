@@ -88,7 +88,49 @@ export function getQuotaRemainingList(date: string) {
   return get('/product/quota/remaining/list', { date })
 }
 
-/** 批量设置某日各品种配额 */
-export function setQuotaBatch(data: { quotaDate: string; items: { productId: number; totalQuota: number }[]; remark?: string }) {
+/** 批量设置某日各品种配额（batchNo 为可选的到货批次标注，批次追溯钩子） */
+export function setQuotaBatch(data: {
+  quotaDate: string
+  items: { productId: number; totalQuota: number; batchNo?: string | null }[]
+  remark?: string
+}) {
   return put('/product/quota/batch', data)
+}
+
+// ==================== 奶品批次（批次追溯钩子，仅召回反查） ====================
+
+export interface ProductBatch {
+  id?: number
+  batchNo: string
+  productId: number
+  productionDate?: string | null
+  arrivalDate?: string | null
+  /** 1-正常，2-召回中，3-已停用 */
+  status?: number
+  remark?: string
+}
+
+/** 批次列表（可按品种/状态筛选） */
+export function getBatchList(params: { productId?: number; status?: number } = {}) {
+  return get('/product/batch/list', params)
+}
+
+/** 新增批次 */
+export function saveBatch(data: ProductBatch) {
+  return post('/product/batch', data)
+}
+
+/** 修改批次 */
+export function updateBatch(data: ProductBatch) {
+  return put('/product/batch', data)
+}
+
+/** 删除批次 */
+export function deleteBatch(id: number) {
+  return del(`/product/batch/${id}`)
+}
+
+/** 批号召回反查：批号 → 配额池 → 台账 → 订单/学生/配送任务 */
+export function traceBatch(batchNo: string) {
+  return get('/product/batch/trace', { batchNo })
 }

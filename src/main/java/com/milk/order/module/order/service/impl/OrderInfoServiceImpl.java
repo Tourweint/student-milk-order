@@ -28,6 +28,7 @@ import com.milk.order.module.order.pay.WechatPaySimulator;
 import com.milk.order.module.order.service.OrderInfoService;
 import com.milk.order.module.order.vo.OrderVO;
 import com.milk.order.module.order.vo.WechatPayParamsVO;
+import com.milk.order.module.refund.service.RefundOrderService;
 import com.milk.order.module.product.entity.MealPackage;
 import com.milk.order.module.product.entity.MealPackageItem;
 import com.milk.order.module.product.entity.Product;
@@ -86,6 +87,16 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
     @Lazy
     @Autowired
     private OrderInfoService self;
+
+    /**
+     * 退款域（退订联动补资金台账，R4）。
+     *
+     * <p>退款服务反向读取订单/配送任务做退款，若直接构造器注入会形成 order ↔ refund 环形依赖，
+     * 故此处按既有 {@link #self} 的同款做法用 @Lazy 字段注入打破环路。</p>
+     */
+    @Lazy
+    @Autowired
+    private RefundOrderService refundOrderService;
 
     private static final DateTimeFormatter NO_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final DateTimeFormatter PAY_TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -195,6 +206,12 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
             throw new BusinessException("学生所属班级不存在");
         }
         // 2. 校验配送日期
+        // 2.0 配送开始日期不得早于今天：过去日期支付成功会一次性补造整段历史配送任务，
+        //     这些任务紧接着被 DeliveryAutoSignJob 当作"超时未签收"自动签收，
+        //     从而凭空产生签收记录与营养摄入（虚假业务事实）。与配送日平移"不可改到已过去的日期"同一口径。
+        if (request.getDeliveryStartDate().isBefore(LocalDate.now())) {
+            throw new BusinessException("配送开始日期不能早于今天，请重新选择配送日期");
+        }
         if (request.getDeliveryEndDate().isBefore(request.getDeliveryStartDate())) {
             throw new BusinessException("配送结束日期不能早于开始日期");
         }
@@ -691,6 +708,11 @@ public class OrderInfoServiceImpl extends ServiceImpl<OrderInfoMapper, OrderInfo
                         .set(OrderInfo::getCancelTime, LocalDateTime.now())
                         .set(OrderInfo::getCancelReason, cancelReason)
                         .update());
+        // 退款联动（R4）：已支付未配送退订在同一事务内补一张全额、即时的退款记录，补齐资金台账。
+        // 放在 CAS 之后：只有真正抢到状态的一方才会写资金记录，并发重复退订不会写出第二张单
+        if (OrderStatus.PAID.getCode().equals(status)) {
+            refundOrderService.createFullRefundForCancelledOrder(order);
+        }
         // 联动作废支付后已生成的未签收配送任务，避免退订后仍可签收
         deliveryTaskService.cancelPendingTasksForOrder(id);
     }

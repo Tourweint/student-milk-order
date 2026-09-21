@@ -76,5 +76,10 @@ Page({
         }
       }
     })
+  },
+
+  /** 申请退款（按期次退款）：进入后展示可退期次与预估金额，再由家长填写申请盒数 */
+  goRefundApply() {
+    wx.navigateTo({ url: '/pages/refund-apply/refund-apply?orderId=' + this.orderId })
   }
 })

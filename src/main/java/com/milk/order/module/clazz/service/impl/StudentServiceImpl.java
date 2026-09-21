@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.milk.order.common.constant.SystemConstants;
+import com.milk.order.common.enums.AllergenType;
 import com.milk.order.exception.BusinessException;
 import com.milk.order.module.user.dto.DataScope;
 import com.milk.order.module.user.service.DataScopeResolver;
@@ -81,6 +82,8 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
     public void createStudent(Student student) {
         checkManageScope(student.getClassId());
         validateStudent(student, null);
+        // 禁忌标签统一走受控枚举规范化（与奶品过敏原同一套编码，未知编码直接拒绝）
+        student.setAllergyTags(AllergenType.normalizeStrict(student.getAllergyTags()));
         save(student);
         classInfoService.refreshStudentCount(student.getClassId());
     }
@@ -101,6 +104,8 @@ public class StudentServiceImpl extends ServiceImpl<StudentMapper, Student> impl
             checkManageScope(student.getClassId());
         }
         validateStudent(student, student.getId());
+        // 禁忌标签规范化（空串＝显式清空，能真正落库；见 AllergenType.normalizeStrict）
+        student.setAllergyTags(AllergenType.normalizeStrict(student.getAllergyTags()));
         updateById(student);
         // 班级发生变化时，新旧两个班级的人数都要刷新
         classInfoService.refreshStudentCount(exists.getClassId());

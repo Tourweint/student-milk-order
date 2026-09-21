@@ -105,8 +105,9 @@ INSERT INTO sys_config (config_key, config_value, description) VALUES
 ('order.pay.reconcile.enabled', 'true', '支付对账补偿任务开关：对待支付订单主动查单，回调丢失时补偿落账'),
 ('order.process.reconcile.enabled', 'true', '过程聚合对账补偿任务开关：修复父订单状态与子任务集合不一致的漂移'),
 ('process.pending.enabled', 'true', '过程实时自愈通道开关：消费自愈待办，秒级驱动父过程聚合'),
-('process.invariant.scan.enabled', 'true', '过程不变量体检开关：周期校验 6 类跨表不变量并自动修复可逆项'),
-('delivery.weekend.stop', 'false', '周末停送开关：开启后周末任务经「配送日历重排」并入工作日（配合 delivery_exception 维护调休例外）；默认关闭＝不改动现状');
+('process.invariant.scan.enabled', 'true', '过程不变量体检开关：周期校验全部已注册的跨表不变量并自动修复可逆项'),
+('delivery.weekend.stop', 'false', '周末停送开关：开启后周末任务经「配送日历重排」并入工作日（配合 delivery_exception 维护调休例外）；默认关闭＝不改动现状'),
+('delivery.parent.exemption.monthly-limit', '3', '家长端「当日豁免」每月次数上限（按学生×自然月计数，落库于 delivery_parent_exemption）；仅当天尚未送出（待配送）的任务可豁免，配额按台账回补原池');
 
 -- ============================================================
 -- 过程补偿规则种子（决策层）
@@ -131,6 +132,7 @@ INSERT INTO process_reconcile_rule
 -- 状态迁移规则种子（默认规则 = 现行硬编码行为；管理端可在线调整）
 -- 场景：ORDER 订单（1待支付 2已支付 3配送中 4已完成 5已退订）
 --      DELIVERY_TASK 配送任务（1待配送 2配送中 3已完成 4已取消）
+--      REFUND 退款单（1待审核 2已审核待退款 3已退款 4已拒绝 5已取消）
 -- ============================================================
 INSERT INTO state_transition_rule (scene, action, from_status, allowed, description) VALUES
 -- 订单
@@ -169,7 +171,23 @@ INSERT INTO state_transition_rule (scene, action, from_status, allowed, descript
 ('DELIVERY_TASK', 'REJECT', 3, 0, '已完成任务禁止改为拒收（禁止状态回退）'),
 ('DELIVERY_TASK', 'STOCKOUT_CANCEL', 1, 1, '配送前缺货仅可取消待配送任务（单期子订单取消）'),
 ('DELIVERY_TASK', 'STOCKOUT_CANCEL', 2, 0, '配送中任务不可缺货自动取消'),
-('DELIVERY_TASK', 'STOCKOUT_CANCEL', 3, 0, '已完成任务禁止缺货取消（禁止状态回退）');
+('DELIVERY_TASK', 'STOCKOUT_CANCEL', 3, 0, '已完成任务禁止缺货取消（禁止状态回退）'),
+-- 退款单（场景 REFUND）：每个动作显式配齐全部可达来源状态（白名单语义，漏配=静默禁止）
+('REFUND', 'AUDIT', 1, 1, '待审核退款单允许审核通过'),
+('REFUND', 'REJECT', 1, 1, '待审核退款单允许拒绝'),
+('REFUND', 'EXECUTE', 1, 0, '未审核退款单禁止直接执行（须先审核）'),
+('REFUND', 'AUDIT', 2, 0, '已审核退款单禁止重复审核'),
+('REFUND', 'REJECT', 2, 0, '已审核退款单禁止再拒绝'),
+('REFUND', 'EXECUTE', 2, 1, '已审核退款单允许执行退款'),
+('REFUND', 'AUDIT', 3, 0, '已退款禁止审核'),
+('REFUND', 'REJECT', 3, 0, '已退款禁止拒绝'),
+('REFUND', 'EXECUTE', 3, 0, '已退款禁止重复执行（重复回调/重复点击由本闸门挡住）'),
+('REFUND', 'AUDIT', 4, 0, '已拒绝退款单禁止审核'),
+('REFUND', 'REJECT', 4, 0, '已拒绝退款单禁止再次拒绝（可重新申请新单）'),
+('REFUND', 'EXECUTE', 4, 0, '已拒绝退款单禁止执行'),
+('REFUND', 'AUDIT', 5, 0, '已取消退款单禁止审核'),
+('REFUND', 'REJECT', 5, 0, '已取消退款单禁止拒绝'),
+('REFUND', 'EXECUTE', 5, 0, '已取消退款单禁止执行');
 
 -- ============================================================
 -- 测试营养成分数据

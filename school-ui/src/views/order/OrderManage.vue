@@ -36,11 +36,12 @@
         </template>
       </el-table-column>
       <el-table-column prop="createTime" label="创建时间" min-width="160" />
-      <el-table-column label="操作" width="220" fixed="right">
+      <el-table-column label="操作" width="270" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" @click="openDetail(row)">详情</el-button>
           <el-button v-if="row.status === 1" link type="success" @click="handlePay(row)">支付</el-button>
           <el-button v-if="row.status === 3" link type="primary" @click="handleComplete(row)">完成</el-button>
+          <el-button v-if="row.status >= 2 && row.status <= 4" link type="warning" @click="goRefunds(row)">退款</el-button>
           <el-button v-if="row.status === 1 || row.status === 2" link type="danger" @click="handleCancel(row)">退订</el-button>
         </template>
       </el-table-column>
@@ -68,6 +69,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { Plus } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -182,6 +184,12 @@ const createVisible = ref(false)
 function onCreated() {
   createVisible.value = false
   fetchList()
+}
+
+// 退款（后台按「可退期次」处理：待配送与缺货取消期次可退；跳转到退款管理页并按订单号筛选）
+const router = useRouter()
+function goRefunds(row: any) {
+  router.push({ path: '/refund', query: { orderNo: row.orderNo } })
 }
 
 onMounted(() => {

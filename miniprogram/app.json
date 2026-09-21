@@ -8,6 +8,8 @@
     "pages/order-create/order-create",
     "pages/order-list/order-list",
     "pages/order-detail/order-detail",
+    "pages/refund-apply/refund-apply",
+    "pages/refund-list/refund-list",
     "pages/nutrition/nutrition",
     "pages/delivery/delivery"
   ],

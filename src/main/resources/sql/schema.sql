@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS student (
     parent_name VARCHAR(50) COMMENT '家长姓名',
     parent_phone VARCHAR(20) COMMENT '家长电话',
     birth_date DATE COMMENT '出生日期',
+    allergy_tags VARCHAR(255) COMMENT '过敏/禁忌标签（逗号分隔的受控编码：LACTOSE/NUTS/PEANUT/SOY/FLAVORING/EGG/OTHER，与 product.allergen_tags 同一套编码，供下单前软警示比对）',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -143,12 +144,31 @@ CREATE TABLE IF NOT EXISTS product (
     status TINYINT DEFAULT 1 COMMENT '状态：0-下架，1-上架',
     sort INT DEFAULT 0 COMMENT '排序',
     nutrition_id BIGINT COMMENT '营养成分ID',
+    allergen_tags VARCHAR(255) COMMENT '过敏原标签（逗号分隔的受控编码：LACTOSE/NUTS/PEANUT/SOY/FLAVORING/EGG/OTHER，与学生 allergy_tags 同一套编码，仅供下单前软警示，不参与计价与流转）',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     KEY idx_category_id (category_id),
     KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='奶品表';
+
+-- 奶品批次表（批次追溯钩子：仅用于「这批奶送给了哪些孩子」的召回反查，不参与任何业务流转）
+-- 建模判断见 docs/论文/后续扩展方案.md §4.7 与 docs/设计方案/2026-09-21-保质期语义校正与批次追溯-设计方案.md
+CREATE TABLE IF NOT EXISTS product_batch (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '批次ID',
+    batch_no VARCHAR(64) NOT NULL COMMENT '批号（奶站/工厂批号，召回反查的业务键）',
+    product_id BIGINT NOT NULL COMMENT '奶品ID',
+    production_date DATE COMMENT '生产日期',
+    arrival_date DATE COMMENT '到货日期',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-正常，2-召回中，3-已停用',
+    remark VARCHAR(255) COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_batch_no (batch_no),
+    KEY idx_product_id (product_id),
+    KEY idx_arrival_date (arrival_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='奶品批次表（批次追溯钩子，不参与业务流转）';
 
 -- 套餐表
 CREATE TABLE IF NOT EXISTS meal_package (
@@ -187,6 +207,7 @@ CREATE TABLE IF NOT EXISTS daily_quota (
     product_id BIGINT NOT NULL COMMENT '奶品ID（按品种设置）',
     total_quota INT NOT NULL COMMENT '当日该品种机动总盒数（管理员设置）',
     used_quota INT NOT NULL DEFAULT 0 COMMENT '当日该品种已售盒数',
+    batch_no VARCHAR(64) COMMENT '可选：当日该品种到货批次号（批次追溯钩子，仅作标注，不参与扣减/结转/台账口径）',
     remark VARCHAR(255) COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -225,6 +246,7 @@ CREATE TABLE IF NOT EXISTS order_info (
     total_amount DECIMAL(10,2) NOT NULL COMMENT '订单总金额（元）',
     pay_amount DECIMAL(10,2) COMMENT '实付金额（元）',
     discount_amount DECIMAL(10,2) DEFAULT 0 COMMENT '优惠金额（元）',
+    contract_total_boxes INT COMMENT '合同总盒数（支付生成任务时快照，此后不变）：退款金额分母基准，见设计方案 R2',
     delivery_start_date DATE COMMENT '配送开始日期',
     delivery_end_date DATE COMMENT '配送结束日期',
     pay_time DATETIME COMMENT '支付时间',
@@ -373,6 +395,49 @@ CREATE TABLE IF NOT EXISTS delivery_compensation (
     KEY idx_target_task (target_task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='拒收补送补偿台账';
 
+-- 当日未送达申报表（奶站申报：任务已标记"已送出"，但物理上没有送到）
+-- 解决的问题：自动签收兜底按「配送日期 < 今天 + 任务配送中 + 记录未签收」判定"超时未签收"，
+--   把**信息态**（已点已送出）当成了**物理态**（奶已到校）。奶站实际没送到时，兜底会签出一条
+--   虚假签收并生成营养摄入。本表把该任务**排除出自动签收候选集**。
+-- 边界（刻意的）：只做标记与待办，**不新增状态、不自动改任何状态**——任务保持"配送中"，
+--   由人工经既有出口处置（签收 / 拒收 / 取消），处置后任务自然离开"配送中"。
+CREATE TABLE IF NOT EXISTS delivery_undelivered_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '申报ID',
+    task_id BIGINT NOT NULL COMMENT '配送任务ID（一条任务只允许申报一次）',
+    order_id BIGINT NOT NULL COMMENT '订单ID（冗余，便于列表与统计）',
+    product_id BIGINT NOT NULL COMMENT '奶品ID（冗余）',
+    class_id BIGINT NOT NULL COMMENT '班级ID（冗余，与 delivery_task 一致，用于班主任数据范围过滤）',
+    delivery_date DATE NOT NULL COMMENT '配送日期（冗余）',
+    reason VARCHAR(255) NOT NULL COMMENT '未送达原因（如车辆故障/道路中断/未备齐）',
+    report_by VARCHAR(50) COMMENT '申报人（用户名，审计痕迹）',
+    handle_status TINYINT NOT NULL DEFAULT 0 COMMENT '跟进状态：0-待跟进，1-已跟进',
+    handle_remark VARCHAR(255) COMMENT '跟进说明（人工处置结果）',
+    handle_by VARCHAR(50) COMMENT '跟进人',
+    handle_time DATETIME COMMENT '跟进时间',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_task (task_id),
+    KEY idx_date_status (delivery_date, handle_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='当日未送达申报（排除出自动签收候选集，人工跟进）';
+
+-- 家长端「当日豁免」次数台账（学生 × 自然月一行：计数是**资源**，必须行锁读 + 条件更新）
+-- 语义：家长当天临时不要这份奶（病假/外出），取消该学生**当天尚未送出**的待配送任务。
+-- 上限按学生×自然月计（sys_config `delivery.parent.exemption.monthly-limit`，默认 3 次），
+-- 取消仍走统一迁移出口（留痕），配额按台账回补原池（与缺货取消同一口径）。
+-- 为什么用"一行一个计数器"而不是"数明细行"：次数上限是并发敏感的资源，
+-- COUNT(*) 判定在并发下会超限（与配额池同类的读-改-写问题）。
+CREATE TABLE IF NOT EXISTS delivery_parent_exemption (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '记录ID',
+    student_id BIGINT NOT NULL COMMENT '学生ID',
+    exempt_month CHAR(7) NOT NULL COMMENT '自然月（YYYY-MM）',
+    used_count INT NOT NULL DEFAULT 0 COMMENT '当月已用豁免次数',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    UNIQUE KEY uk_student_month (student_id, exempt_month)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='家长端当日豁免次数台账（学生×自然月）';
+
 -- 配送例外表（周末停送与调休例外，管理员手动维护）
 -- 只描述「与日历默认规则不同」的日期，不推算官方节假日（官方调休每年发布、各地不同）：
 --   type=1 停送：默认要送但不送 → 该日任务并入前一个有效配送日；
@@ -451,8 +516,8 @@ CREATE TABLE IF NOT EXISTS sys_config (
 -- 状态迁移规则表（管理端可在线配置：某场景某动作从某状态迁移是否允许；白名单语义，未配置默认禁止）
 CREATE TABLE IF NOT EXISTS state_transition_rule (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '规则ID',
-    scene VARCHAR(30) NOT NULL COMMENT '状态机场景：ORDER-订单，DELIVERY_TASK-配送任务',
-    action VARCHAR(30) NOT NULL COMMENT '动作编码：PAY/CANCEL/DELIVER/AUTO_COMPLETE/COMPLETE/DISPATCH/TASK_CANCEL/SIGN/REJECT/STOCKOUT_CANCEL',
+    scene VARCHAR(30) NOT NULL COMMENT '状态机场景：ORDER-订单，DELIVERY_TASK-配送任务，REFUND-退款单（DELIVERY_RECORD 为任务下挂子状态机，未纳入本表）',
+    action VARCHAR(30) NOT NULL COMMENT '动作编码：PAY/CANCEL/DELIVER/AUTO_COMPLETE/COMPLETE/DISPATCH/TASK_CANCEL/SIGN/REJECT/STOCKOUT_CANCEL/AUDIT/EXECUTE',
     from_status TINYINT NOT NULL COMMENT '来源状态码',
     allowed TINYINT NOT NULL DEFAULT 1 COMMENT '是否允许迁移：1-允许，0-禁止',
     description VARCHAR(255) COMMENT '规则说明',
@@ -461,6 +526,43 @@ CREATE TABLE IF NOT EXISTS state_transition_rule (
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
     UNIQUE KEY uk_scene_action_from (scene, action, from_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='状态迁移规则表（管理端可配置）';
+
+-- 退款单（退款域父过程）：一单一行 —— 一张退款单即一条资金记录，不另建退款明细表。
+-- 状态迁移经 state_transition_rule 的 REFUND 场景统一出口（AUDIT/REJECT/EXECUTE），不手写状态更新。
+CREATE TABLE IF NOT EXISTS refund_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '退款单ID',
+    refund_no VARCHAR(50) NOT NULL COMMENT '退款单号（RF+时间戳+实例标识+序列，跨实例唯一）',
+    order_id BIGINT NOT NULL COMMENT '订单ID',
+    order_no VARCHAR(50) COMMENT '订单编号（冗余，便于按单号检索）',
+    student_id BIGINT COMMENT '学生ID',
+    user_id BIGINT COMMENT '申请人用户ID',
+    apply_box_count INT COMMENT '申请盒数（参考值；实际退款盒数以执行时刻按 R1 口径计算）',
+    refunded_boxes INT NOT NULL DEFAULT 0 COMMENT '累计已退盒数（该订单截至本单的累计值，执行时回填）',
+    refund_amount DECIMAL(10,2) COMMENT '退款金额（元，执行时回填）',
+    status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1-待审核，2-已审核待退款，3-已退款，4-已拒绝，5-已取消',
+    apply_reason VARCHAR(255) COMMENT '申请原因',
+    audit_user_id BIGINT COMMENT '审核人用户ID',
+    audit_time DATETIME COMMENT '审核时间',
+    audit_remark VARCHAR(255) COMMENT '审核意见',
+    refund_channel TINYINT COMMENT '退款通道：1-模拟微信',
+    refund_time DATETIME COMMENT '退款完成时间',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除',
+    -- 生成列必须放在 status/deleted 之后（生成列表达式引用它们）：
+    -- 进行中(1/2)且未逻辑删除时取 order_id，否则为 NULL —— NULL 不参与唯一键比较，
+    -- 于是 uk_refund_active 精确表达「同一订单最多一张进行中退款单」，且终态/删除后自动释放该键。
+    active_order_id BIGINT GENERATED ALWAYS AS
+        (CASE WHEN deleted = 0 AND status IN (1, 2) THEN order_id ELSE NULL END) STORED
+        COMMENT '进行中退款单的订单ID（生成列，供 uk_refund_active 唯一约束）',
+    UNIQUE KEY uk_refund_no (refund_no),
+    UNIQUE KEY uk_refund_active (active_order_id),
+    KEY idx_order_id (order_id),
+    KEY idx_order_no (order_no),
+    KEY idx_student_id (student_id),
+    KEY idx_status (status),
+    KEY idx_create_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='退款单（退款域父过程）';
 
 -- 业务过程迁移台账（过程层可观测基础）：每次状态迁移落一行，成功与 CAS 冲突都记录；
 -- 支撑“过程回放 / 问题回溯 / 父子状态聚合对账 / 实验取证”

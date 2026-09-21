@@ -31,6 +31,15 @@ public class DailyQuota extends BaseEntity {
     /** 当日该品种已售盒数（零散订购支付成功后累加，退订回补） */
     private Integer usedQuota;
 
+    /**
+     * 可选：当日该品种的到货批次号（**批次追溯钩子**，仅作标注）。
+     *
+     * <p>刻意只作字符串标注、不做外键：批次不参与扣减、结转与台账口径，
+     * 它的唯一用途是「批号 → 池子 → 台账 → 订单/学生」的召回反查（见 {@code ProductBatchService.trace}）。
+     * 因此批号未建档也允许先标注（事故当场可直接反查），建档只提供生产/到货日期等元信息。</p>
+     */
+    private String batchNo;
+
     /** 备注 */
     private String remark;
 }

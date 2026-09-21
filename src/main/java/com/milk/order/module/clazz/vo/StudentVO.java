@@ -37,6 +37,9 @@ public class StudentVO implements Serializable {
 
     private LocalDate birthDate;
 
+    /** 过敏/禁忌标签（受控编码的逗号分隔串，前端按 /api/order/allergy-options 映射文案） */
+    private String allergyTags;
+
     private String remark;
 
     private LocalDateTime createTime;
@@ -53,6 +56,7 @@ public class StudentVO implements Serializable {
         vo.setParentName(student.getParentName());
         vo.setParentPhone(student.getParentPhone());
         vo.setBirthDate(student.getBirthDate());
+        vo.setAllergyTags(student.getAllergyTags());
         vo.setRemark(student.getRemark());
         vo.setCreateTime(student.getCreateTime());
         return vo;

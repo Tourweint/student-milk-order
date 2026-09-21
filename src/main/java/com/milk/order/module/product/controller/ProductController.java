@@ -5,12 +5,15 @@ import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
 import com.milk.order.module.product.dto.DailyQuotaBatchRequest;
 import com.milk.order.module.product.dto.PackageSaveRequest;
+import com.milk.order.module.product.vo.BatchTraceVO;
 import com.milk.order.module.product.vo.QuotaVO;
 import com.milk.order.module.product.entity.MealPackage;
 import com.milk.order.module.product.entity.Product;
+import com.milk.order.module.product.entity.ProductBatch;
 import com.milk.order.module.product.entity.ProductCategory;
 import com.milk.order.module.product.service.DailyQuotaService;
 import com.milk.order.module.product.service.MealPackageService;
+import com.milk.order.module.product.service.ProductBatchService;
 import com.milk.order.module.product.service.ProductCategoryService;
 import com.milk.order.module.product.service.ProductService;
 import com.milk.order.module.product.vo.MealPackageDetailVO;
@@ -34,6 +37,12 @@ import java.util.List;
  * - GET /api/product/quota/list          配额列表（日期区间）
  * - GET /api/product/quota/remaining     某日剩余机动盒数
  * - PUT /api/product/quota               设置某日机动配额
+ * 批次追溯钩子（仅召回反查，不参与业务流转）：
+ * - GET    /api/product/batch/list       批次列表
+ * - POST   /api/product/batch            新增批次
+ * - PUT    /api/product/batch            修改批次
+ * - DELETE /api/product/batch/{id}       删除批次（逻辑删除）
+ * - GET    /api/product/batch/trace      批号召回反查（批号 → 配额池 → 台账 → 订单/学生/任务）
  */
 @RestController
 @RequestMapping("/api/product")
@@ -44,6 +53,7 @@ public class ProductController {
     private final ProductService productService;
     private final MealPackageService packageService;
     private final DailyQuotaService dailyQuotaService;
+    private final ProductBatchService productBatchService;
 
     // ==================== 品类 ====================
 
@@ -161,5 +171,37 @@ public class ProductController {
     public ApiResponse<Void> setQuotaBatch(@Valid @RequestBody DailyQuotaBatchRequest request) {
         dailyQuotaService.setQuotaBatch(request.getQuotaDate(), request.getItems(), request.getRemark());
         return ApiResponse.success();
+    }
+
+    // ==================== 批次追溯钩子（仅召回反查，不参与业务流转） ====================
+
+    @GetMapping("/batch/list")
+    public ApiResponse<List<ProductBatch>> batchList(@RequestParam(required = false) Long productId,
+                                                     @RequestParam(required = false) Integer status) {
+        return ApiResponse.success(productBatchService.listBatches(productId, status));
+    }
+
+    @PostMapping("/batch")
+    public ApiResponse<Void> saveBatch(@RequestBody ProductBatch batch) {
+        productBatchService.createBatch(batch);
+        return ApiResponse.success();
+    }
+
+    @PutMapping("/batch")
+    public ApiResponse<Void> updateBatch(@RequestBody ProductBatch batch) {
+        productBatchService.updateBatch(batch);
+        return ApiResponse.success();
+    }
+
+    @DeleteMapping("/batch/{id}")
+    public ApiResponse<Void> deleteBatch(@PathVariable Long id) {
+        productBatchService.deleteBatch(id);
+        return ApiResponse.success();
+    }
+
+    /** 批号召回反查：批号 → 配额池（日期×品种）→ 扣减台账 → 订单/学生/配送任务与签收状态 */
+    @GetMapping("/batch/trace")
+    public ApiResponse<BatchTraceVO> traceBatch(@RequestParam String batchNo) {
+        return ApiResponse.success(productBatchService.trace(batchNo));
     }
 }

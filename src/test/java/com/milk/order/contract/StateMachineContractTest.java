@@ -37,6 +37,9 @@ class StateMachineContractTest extends ExperimentSupport {
     /** 配送任务状态机：动作 → 必须配置规则的来源状态集合 */
     private static final Map<String, List<Integer>> TASK_ACTIONS = new LinkedHashMap<>();
 
+    /** 退款单状态机：动作 → 必须配置规则的来源状态集合（1待审核 2已审核待退款 3已退款 4已拒绝 5已取消） */
+    private static final Map<String, List<Integer>> REFUND_ACTIONS = new LinkedHashMap<>();
+
     static {
         ORDER_ACTIONS.put(StateTransitions.ACTION_PAY, List.of(1, 2, 3, 4, 5));
         ORDER_ACTIONS.put(StateTransitions.ACTION_CANCEL, List.of(1, 2, 3, 4, 5));
@@ -49,6 +52,11 @@ class StateMachineContractTest extends ExperimentSupport {
         TASK_ACTIONS.put(StateTransitions.ACTION_SIGN, List.of(2, 3));
         TASK_ACTIONS.put(StateTransitions.ACTION_REJECT, List.of(2, 3));
         TASK_ACTIONS.put(StateTransitions.ACTION_STOCKOUT_CANCEL, List.of(1, 2, 3));
+
+        // 退款单：审核/拒绝/执行三个动作都必须覆盖全部可达来源状态（含显式 allowed=0 的封闭行）
+        REFUND_ACTIONS.put(StateTransitions.ACTION_AUDIT, List.of(1, 2, 3, 4, 5));
+        REFUND_ACTIONS.put(StateTransitions.ACTION_REJECT, List.of(1, 2, 3, 4, 5));
+        REFUND_ACTIONS.put(StateTransitions.ACTION_EXECUTE, List.of(1, 2, 3, 4, 5));
     }
 
     @Test
@@ -57,10 +65,12 @@ class StateMachineContractTest extends ExperimentSupport {
         List<String> missing = new ArrayList<>();
         collectMissing(StateTransitions.SCENE_ORDER, ORDER_ACTIONS, missing);
         collectMissing(StateTransitions.SCENE_DELIVERY_TASK, TASK_ACTIONS, missing);
+        collectMissing(StateTransitions.SCENE_REFUND, REFUND_ACTIONS, missing);
 
         report("契约矩阵 · A：规则覆盖完整性",
                 "订单动作数", ORDER_ACTIONS.size(),
                 "任务动作数", TASK_ACTIONS.size(),
+                "退款单动作数", REFUND_ACTIONS.size(),
                 "应覆盖的（场景/动作/来源状态）组合数", totalCombinations(),
                 "实际缺失组合数", missing.size(),
                 "缺失明细", missing.isEmpty() ? "（无）" : missing);
@@ -87,6 +97,13 @@ class StateMachineContractTest extends ExperimentSupport {
         // 已取消任务：禁止任何回退
         assertThat(allowed(StateTransitions.SCENE_DELIVERY_TASK, StateTransitions.ACTION_SIGN, 4)).isFalse();
         assertThat(allowed(StateTransitions.SCENE_DELIVERY_TASK, StateTransitions.ACTION_DISPATCH, 4)).isFalse();
+        // 退款单安全底线：未审核不得直接执行；已退款/已拒绝/已取消不得再审核或重复执行
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_EXECUTE, 1)).isFalse();
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_EXECUTE, 3)).isFalse();
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_AUDIT, 3)).isFalse();
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_AUDIT, 4)).isFalse();
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_EXECUTE, 4)).isFalse();
+        assertThat(allowed(StateTransitions.SCENE_REFUND, StateTransitions.ACTION_EXECUTE, 5)).isFalse();
         // 白名单语义：未配置的组合默认禁止
         assertThat(allowed(StateTransitions.SCENE_ORDER, "UNKNOWN_ACTION", 1)).isFalse();
         assertThat(allowed(StateTransitions.SCENE_DELIVERY_TASK, StateTransitions.ACTION_SIGN, 1)).isFalse();
@@ -143,7 +160,8 @@ class StateMachineContractTest extends ExperimentSupport {
 
     private int totalCombinations() {
         return ORDER_ACTIONS.values().stream().mapToInt(List::size).sum()
-                + TASK_ACTIONS.values().stream().mapToInt(List::size).sum();
+                + TASK_ACTIONS.values().stream().mapToInt(List::size).sum()
+                + REFUND_ACTIONS.values().stream().mapToInt(List::size).sum();
     }
 
     private boolean allowed(String scene, String action, int fromStatus) {

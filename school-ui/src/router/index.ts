@@ -71,6 +71,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '配送日历', icon: 'Calendar', roles: ['ADMIN'] }
       },
       {
+        path: 'refund',
+        name: 'RefundManage',
+        component: () => import('@/views/refund/RefundManage.vue'),
+        meta: { title: '退款管理', icon: 'Money', roles: ['ADMIN'] }
+      },
+      {
         path: 'nutrition',
         name: 'NutritionStats',
         component: () => import('@/views/nutrition/NutritionStats.vue'),

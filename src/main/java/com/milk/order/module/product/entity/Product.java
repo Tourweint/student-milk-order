@@ -47,4 +47,13 @@ public class Product extends BaseEntity {
 
     /** 营养成分 ID（关联 nutrition_info） */
     private Long nutritionId;
+
+    /**
+     * 过敏原标签（逗号分隔的受控编码，取值来自 {@link com.milk.order.common.enums.AllergenType}）。
+     *
+     * <p>与学生的 `allergy_tags` **共用同一套编码**，供下单前"学生禁忌 ∩ 奶品过敏原"软警示使用；
+     * 只做提示不拦截（见 {@code AllergyWarningService}）。写入时经
+     * {@code AllergenType.normalizeStrict} 统一规范化，未知编码直接拒绝。</p>
+     */
+    private String allergenTags;
 }

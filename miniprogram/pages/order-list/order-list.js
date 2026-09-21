@@ -85,6 +85,12 @@ Page({
     wx.navigateTo({ url: '/pages/order-detail/order-detail?id=' + id })
   },
 
+  /** 申请退款（按期次退款）：进入后可预览可退期次与预估金额 */
+  goRefundApply(e) {
+    const id = Number(e.currentTarget.dataset.id)
+    wx.navigateTo({ url: '/pages/refund-apply/refund-apply?orderId=' + id })
+  },
+
   /** 去支付（模拟微信支付） */
   async handlePay(e) {
     const id = Number(e.currentTarget.dataset.id)

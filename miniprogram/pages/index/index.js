@@ -16,7 +16,8 @@ Page({
     pendingQuantity: 0,
     pendingLoaded: false,
     nextDeliveryDate: '',
-    recentRejects: []
+    recentRejects: [],
+    exemption: null
   },
 
   onShow() {
@@ -48,6 +49,57 @@ Page({
     }
     // 家长端首页信息（剩余/下次配送日/近期拒收）独立加载：失败不影响首页其他内容
     this.loadParentHome()
+    // 「当日豁免」名额独立加载：失败即不渲染该卡片（不误导为"可以豁免"）
+    this.loadExemption()
+  },
+
+  /**
+   * 家长端「当日豁免」名额：今天可豁免任务数 + 本月剩余次数。
+   * 独立加载、失败不渲染（与 pendingLoaded 同一约定：拿不到值不得当成 0/可用的正向结论）。
+   */
+  async loadExemption() {
+    try {
+      const data = await deliveryApi.getParentExemption()
+      if (!data || !Number.isInteger(data.exemptableCount) || !Number.isInteger(data.remaining)) {
+        throw new Error('豁免名额返回值异常')
+      }
+      this.setData({ exemption: data })
+    } catch (e) {
+      console.error('加载当日豁免名额失败', e)
+      this.setData({ exemption: null })
+    }
+  },
+
+  /** 申请当日豁免：二次确认（不可撤销、占用月度次数）后调用 */
+  async onExemptToday() {
+    const info = this.data.exemption
+    if (!info || !info.exemptableCount) {
+      wx.showToast({ title: '今天没有可豁免的配送', icon: 'none' })
+      return
+    }
+    const confirm = await new Promise((resolve) => {
+      wx.showModal({
+        title: '申请当日豁免',
+        content: `今天还有 ${info.exemptableCount} 份奶尚未送出，确认今天不要了吗？\n`
+          + `取消后不再配送（配额会回补），本月剩余 ${info.remaining} / ${info.monthlyLimit} 次，操作不可撤销。`,
+        confirmText: '确认豁免',
+        cancelText: '再想想',
+        success: (res) => resolve(res.confirm),
+        fail: () => resolve(false)
+      })
+    })
+    if (!confirm) return
+    try {
+      const result = await deliveryApi.exemptToday('家长申请当日豁免')
+      wx.showToast({ title: '已豁免今天的配送', icon: 'success' })
+      this.setData({ exemption: result })
+      // 剩余待配送盒数随之变化，重新拉一次首页聚合
+      this.loadParentHome()
+    } catch (e) {
+      // 业务错误（如本月次数用完、任务已送出）已由 request 统一提示
+      console.error('当日豁免失败', e)
+      this.loadExemption()
+    }
   },
 
   /**

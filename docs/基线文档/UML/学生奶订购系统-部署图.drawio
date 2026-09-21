@@ -1,0 +1,112 @@
+<mxfile host="app.diagrams.net" agent="openclaw-drawio" version="24.7.17" type="device" pages="1">
+  <diagram id="deploy-01" name="部署图">
+    <mxGraphModel dx="1427" dy="858" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="学生奶订购系统 · 部署图" style="text;html=1;align=left;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1F3864;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="560" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="前后端分离 · 过程层 / 可靠性层横切 · 与 docs/基线文档/系统架构.md 一致 · 2026-09-21" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="42" y="60" width="780" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="phone" value="家长手机" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=13;fontStyle=1;fillColor=#F5F5F5;strokeColor=#666666;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="250" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="mp" value="微信小程序(miniprogram)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=12;" vertex="1" parent="phone">
+          <mxGeometry x="25" y="55" width="200" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="pc" value="教师 / 管理员电脑" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=13;fontStyle=1;fillColor=#F5F5F5;strokeColor=#666666;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="430" width="250" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="browser" value="浏览器(Web 管理端)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=12;" vertex="1" parent="pc">
+          <mxGeometry x="25" y="55" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="nginx" value="Web 服务器 · Nginx :80" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=13;fontStyle=1;fillColor=#F5F5F5;strokeColor=#666666;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="400" y="410" width="280" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="dist" value="school-ui / dist(Vue3 静态资源)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#666666;fontSize=12;" vertex="1" parent="nginx">
+          <mxGeometry x="30" y="55" width="220" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="app" value="应用服务器 · Spring Boot :8090" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=14;fontStyle=1;fillColor=#F2F7FD;strokeColor=#2F5496;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="760" y="100" width="450" height="640" as="geometry" />
+        </mxCell>
+        <mxCell id="jwt" value="JWT 过滤器(认证)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="25" y="60" width="185" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ctrl" value="Controller 层(REST /api)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="25" y="175" width="185" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="svc" value="Service 业务层(统一迁移出口 · 事务边界)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="25" y="290" width="185" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="mapper" value="Mapper 持久层(MyBatis-Plus)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="25" y="425" width="185" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="job" value="定时任务(超时取消 · 支付对账 · 过程对账 · 自动签收)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="240" y="60" width="185" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="paysim" value="微信支付模拟器(同事务落账)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="240" y="215" width="185" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="poi" value="Excel 导入导出(POI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="app">
+          <mxGeometry x="240" y="350" width="185" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="crosscut" value="横切:过程层(状态迁移出口) · 可靠性层(幂等守卫)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=none;strokeColor=#2F5496;fontSize=11;fontStyle=2;fontColor=#2F5496;" vertex="1" parent="app">
+          <mxGeometry x="240" y="470" width="185" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="db" value="数据库服务器 · MySQL :3306" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=13;fontStyle=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="250" width="240" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="schema" value="student_milk_order" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#FFFFFF;strokeColor=#82B366;fontSize=12;" vertex="1" parent="db">
+          <mxGeometry x="30" y="60" width="180" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="wx" value="微信服务器(外部)" style="rounded=1;whiteSpace=wrap;html=1;verticalAlign=top;fontSize=13;fontStyle=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=4;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="570" width="240" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="jscode" value="jscode2session" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=12;" vertex="1" parent="wx">
+          <mxGeometry x="25" y="50" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="paycb" value="支付回调接口(模拟)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D79B00;fontSize=12;" vertex="1" parent="wx">
+          <mxGeometry x="25" y="125" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" value="HTTPS /api(本地联调直连 8090)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.22;entryDx=0;entryDy=0;" edge="1" parent="1" source="mp" target="app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="HTTP :80" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="browser" target="nginx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="反向代理 /api" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.55;entryDx=0;entryDy=0;" edge="1" parent="1" source="nginx" target="app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="JDBC :3306" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=1;exitY=0.35;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="app" target="db">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="code 换取 openid · 支付预下单" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=1;exitY=0.62;exitDx=0;exitDy=0;entryX=0;entryY=0.35;entryDx=0;entryDy=0;" edge="1" parent="1" source="app" target="wx">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="支付结果回调 notify" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#8EAADB;fontSize=11;labelBackgroundColor=#FFFFFF;endArrow=block;endFill=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=1;entryY=0.75;entryDx=0;entryDy=0;" edge="1" parent="1" source="wx" target="app">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;endArrow=block;endFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="app" source="jwt" target="ctrl">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;endArrow=block;endFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="app" source="ctrl" target="svc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;endArrow=block;endFill=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="app" source="svc" target="mapper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#8EAADB;endArrow=block;endFill=1;exitX=1;exitY=0.25;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="app" source="svc" target="job">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#8EAADB;endArrow=block;endFill=1;exitX=1;exitY=0.6;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="app" source="svc" target="paysim">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#8EAADB;endArrow=block;endFill=1;exitX=1;exitY=0.85;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="app" source="svc" target="poi">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -21,6 +21,9 @@
       <el-table-column prop="categoryName" label="品类" width="100" />
       <el-table-column prop="spec" label="规格" width="110" />
       <el-table-column prop="flavor" label="口味" width="90" />
+      <el-table-column label="过敏原" min-width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ allergenLabel(row.allergenTags) }}</template>
+      </el-table-column>
       <el-table-column label="单价" width="90">
         <template #default="{ row }">¥{{ Number(row.price).toFixed(2) }}</template>
       </el-table-column>
@@ -82,6 +85,14 @@
             <el-radio :value="0">下架</el-radio>
           </el-radio-group>
         </el-form-item>
+        <el-form-item label="过敏原">
+          <el-select
+            v-model="form.allergenTags" multiple clearable placeholder="如：乳糖（下单时对有关禁忌的学生软提示，不拦截）"
+            style="width: 100%"
+          >
+            <el-option v-for="o in allergenOptions" :key="o.code" :label="o.text" :value="o.code" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
         </el-form-item>
@@ -101,6 +112,7 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import {
   getProductList, getCategoryList, saveProduct, updateProduct, deleteProduct
 } from '@/api/product'
+import { ensureAllergenOptions, allergenLabel, parseAllergenCodes } from '@/utils/allergen'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -137,8 +149,10 @@ const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive<any>({
   id: null, productName: '', categoryId: null, spec: '', flavor: '',
-  price: 0, costPrice: 0, sort: 0, status: 1, description: ''
+  price: 0, costPrice: 0, sort: 0, status: 1, description: '', allergenTags: [] as string[]
 })
+/** 受控过敏原选项（后端下发，奶品侧文案） */
+const allergenOptions = ref<any[]>([])
 const rules: FormRules = {
   productName: [{ required: true, message: '请输入奶品名称', trigger: 'blur' }],
   categoryId: [{ required: true, message: '请选择品类', trigger: 'change' }],
@@ -156,7 +170,8 @@ function openDialog(row?: any) {
     costPrice: row?.costPrice ?? 0,
     sort: row?.sort ?? 0,
     status: row?.status ?? 1,
-    description: row?.description ?? ''
+    description: row?.description ?? '',
+    allergenTags: parseAllergenCodes(row?.allergenTags)
   })
   dialogVisible.value = true
 }
@@ -167,11 +182,13 @@ async function handleSubmit() {
     if (!valid) return
     submitting.value = true
     try {
+      // allergenTags 表单里是数组，落库是逗号分隔串；空数组 → 空串（显式清空，能真正写库）
+      const payload = { ...form, allergenTags: (form.allergenTags || []).join(',') }
       if (form.id) {
-        await updateProduct(form)
+        await updateProduct(payload)
         ElMessage.success('修改成功')
       } else {
-        await saveProduct(form)
+        await saveProduct(payload)
         ElMessage.success('新增成功')
       }
       dialogVisible.value = false
@@ -191,9 +208,15 @@ async function handleDelete(row: any) {
   fetchList()
 }
 
-onMounted(() => {
+onMounted(async () => {
   fetchCategories()
   fetchList()
+  // 过敏原选项失败不阻断页面：只影响标签列文案与下拉可选项
+  try {
+    allergenOptions.value = await ensureAllergenOptions()
+  } catch (e) {
+    console.error('加载过敏原选项失败', e)
+  }
 })
 </script>
 

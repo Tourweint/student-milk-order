@@ -1,0 +1,95 @@
+.page {
+  min-height: 100vh;
+}
+
+/* 状态筛选（与订单列表同款） */
+.tabs {
+  display: flex;
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1rpx solid #ebeef5;
+}
+.tab {
+  flex: 1;
+  text-align: center;
+  padding: 24rpx 0;
+  font-size: 26rpx;
+  color: #606266;
+}
+.tab-active {
+  color: #409eff;
+  font-weight: 600;
+  border-bottom: 4rpx solid #409eff;
+}
+
+/* 退款单卡片 */
+.refund-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 16rpx;
+  border-bottom: 1rpx solid #f2f3f5;
+}
+.refund-no {
+  font-size: 26rpx;
+  color: #606266;
+}
+.refund-status {
+  font-size: 26rpx;
+  font-weight: 600;
+}
+.status-1 { color: #e6a23c; }
+.status-2 { color: #409eff; }
+.status-3 { color: #67c23a; }
+.status-4 { color: #f56c6c; }
+.status-5 { color: #909399; }
+
+.refund-body {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-top: 16rpx;
+}
+.refund-main {
+  flex: 1;
+  padding-right: 16rpx;
+}
+.refund-order {
+  font-size: 28rpx;
+  color: #303133;
+}
+.refund-meta {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #909399;
+}
+.refund-reason,
+.refund-audit {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #909399;
+}
+.refund-amount {
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.refund-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #f2f3f5;
+}
+.refund-time {
+  font-size: 22rpx;
+  color: #c0c4cc;
+}
+
+.empty-action {
+  margin-top: 20rpx;
+  color: #409eff;
+  font-size: 26rpx;
+}

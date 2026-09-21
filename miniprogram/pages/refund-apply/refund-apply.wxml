@@ -1,0 +1,50 @@
+<view class="container" wx:if="{{preview}}">
+  <!-- 订单与金额概览 -->
+  <view class="card">
+    <view class="card-title">退款概览</view>
+    <view class="row"><text class="row-label">订单号</text><text class="row-value">{{preview.orderNo}}</text></view>
+    <view class="row"><text class="row-label">订单状态</text><text class="row-value">{{preview.orderStatusText}}</text></view>
+    <view class="row"><text class="row-label">合同总盒数</text><text class="row-value">{{preview.contractTotalBoxes}}</text></view>
+    <view class="row"><text class="row-label">当前可退盒数</text><text class="row-value text-price">{{preview.refundableBoxes}} 盒</text></view>
+    <view class="row"><text class="row-label">已退盒数（累计）</text><text class="row-value">{{preview.refundedBoxes}}</text></view>
+    <view class="row"><text class="row-label">已退金额</text><text class="row-value">¥{{preview.refundedAmount}}</text></view>
+    <view class="row"><text class="row-label">预估本次退款</text><text class="row-value text-price">¥{{preview.estimatedAmount}}</text></view>
+    <view class="tip">预估金额仅供参考：实际退款金额在执行时按"当时仍可退的期次"计算（申请后若某天已配送，该期次不再可退）。</view>
+    <view class="tip tip-warn" wx:if="{{preview.hasActiveRefund}}">该订单已有进行中的退款单，请勿重复申请。</view>
+  </view>
+
+  <!-- 可退期次明细 -->
+  <view class="card" wx:if="{{preview.refundableTasks.length}}">
+    <view class="card-title">可退期次（{{preview.refundableTasks.length}}）</view>
+    <view class="task" wx:for="{{preview.refundableTasks}}" wx:key="taskId">
+      <view class="task-main">
+        <view class="task-date">{{item.deliveryDate}}</view>
+        <view class="task-meta">{{item.productName}} · {{item.statusText}}</view>
+      </view>
+      <view class="task-boxes">{{item.refundableBoxes}} 盒</view>
+    </view>
+  </view>
+
+  <!-- 申请表单 -->
+  <view class="card">
+    <view class="card-title">提交申请</view>
+    <view class="form-item">
+      <view class="form-label">申请盒数（参考值，最多 {{preview.refundableBoxes}} 盒）</view>
+      <input class="form-input" type="number" placeholder="请输入申请盒数" value="{{applyBoxCount}}" bindinput="onBoxInput" />
+    </view>
+    <view class="form-item">
+      <view class="form-label">申请原因（可选）</view>
+      <textarea class="form-textarea" placeholder="例如：学期中不再需要，申请退回未配送期次" value="{{reason}}" bindinput="onReasonInput" maxlength="200" />
+    </view>
+  </view>
+
+  <button
+    class="btn-primary submit-btn"
+    bindtap="handleSubmit"
+    loading="{{submitting}}"
+    disabled="{{preview.hasActiveRefund || preview.refundableBoxes <= 0}}"
+  >提交退款申请</button>
+</view>
+
+<view wx:elif="{{loading}}" class="empty">加载中…</view>
+<view wx:else class="empty">该订单当前无可退期次</view>

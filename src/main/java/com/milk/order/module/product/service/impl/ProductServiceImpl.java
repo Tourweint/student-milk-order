@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.milk.order.common.constant.SystemConstants;
+import com.milk.order.common.enums.AllergenType;
 import com.milk.order.exception.BusinessException;
 import com.milk.order.module.product.entity.Product;
 import com.milk.order.module.product.entity.ProductCategory;
@@ -68,6 +69,8 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
         if (product.getSort() == null) {
             product.setSort(0);
         }
+        // 过敏原标签统一走受控枚举规范化（未知编码直接拒绝，避免"配了却永不命中"）
+        product.setAllergenTags(AllergenType.normalizeStrict(product.getAllergenTags()));
         save(product);
     }
 
@@ -81,6 +84,7 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
             throw new BusinessException("奶品不存在");
         }
         validate(product);
+        product.setAllergenTags(AllergenType.normalizeStrict(product.getAllergenTags()));
         updateById(product);
     }
 

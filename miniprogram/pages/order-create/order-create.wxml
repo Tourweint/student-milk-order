@@ -8,7 +8,7 @@
     </view>
     <view class="row" wx:if="{{mode !== 'package'}}">
       <text class="row-label">配送日期</text>
-      <picker mode="date" value="{{startDate}}" bindchange="onStartChange">
+      <picker mode="date" value="{{startDate}}" start="{{minDate}}" bindchange="onStartChange">
         <view class="picker-value">{{startDate || '请选择'}}</view>
       </picker>
     </view>

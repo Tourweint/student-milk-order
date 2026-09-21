@@ -37,6 +37,15 @@ public class Student extends BaseEntity {
     /** 出生日期 */
     private java.time.LocalDate birthDate;
 
+    /**
+     * 过敏/禁忌标签（逗号分隔的受控编码，取值来自 {@link com.milk.order.common.enums.AllergenType}）。
+     *
+     * <p>与奶品表的 `allergen_tags` **共用同一套编码**——下单预检的命中判定是两者交集，
+     * 若两侧自由文本各写各的（"乳糖不耐" vs "乳糖"），警示会静默失效。写入时经
+     * {@code AllergenType.normalizeStrict} 统一规范化。</p>
+     */
+    private String allergyTags;
+
     /** 备注 */
     private String remark;
 }

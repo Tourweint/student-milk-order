@@ -18,6 +18,15 @@
     </view>
   </view>
 
+  <!-- 当日豁免：今天还有未送出的奶时，家长可临时不要（每月限次，配额回补） -->
+  <view class="card exempt-card" wx:if="{{exemption && exemption.exemptableCount > 0}}">
+    <view class="exempt-main">
+      <text class="exempt-title">今天有 {{exemption.exemptableCount}} 份奶尚未送出</text>
+      <text class="exempt-tip">临时不要（病假/外出）可申请当日豁免：取消今天未送出的配送，配额回补给其他孩子；本月剩余 {{exemption.remaining}} 次</text>
+    </view>
+    <button class="exempt-btn" size="mini" type="warn" bindtap="onExemptToday">当日豁免</button>
+  </view>
+
   <!-- 近期拒收（仅真拒收；退订/缺货取消不会出现在这里） -->
   <view class="card" wx:if="{{recentRejects.length}}">
     <view class="card-title">近期拒收</view>

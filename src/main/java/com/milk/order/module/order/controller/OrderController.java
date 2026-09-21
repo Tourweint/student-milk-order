@@ -5,7 +5,10 @@ import com.milk.order.common.ApiResponse;
 import com.milk.order.common.PageResult;
 import com.milk.order.module.order.dto.CreateOrderRequest;
 import com.milk.order.module.order.entity.OrderItem;
+import com.milk.order.module.order.service.AllergyWarningService;
 import com.milk.order.module.order.service.OrderInfoService;
+import com.milk.order.module.order.vo.AllergyOptionVO;
+import com.milk.order.module.order.vo.AllergyWarningVO;
 import com.milk.order.module.order.vo.OrderVO;
 import com.milk.order.module.order.vo.WechatPayParamsVO;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +30,8 @@ import java.util.List;
  * - PUT    /api/order/complete/{id}  完成订单（配送中→已完成）
  * - GET    /api/order/{id}/items     订单明细
  * - GET    /api/order/{id}/pay-result 支付结果查单（模拟微信查单：回调丢失时前端主动补偿）
+ * - GET    /api/order/allergy-options 过敏原受控选项（学生禁忌与奶品过敏原共用一套编码）
+ * - GET    /api/order/allergy-check   下单前过敏/禁忌软警示预检（只提示，不拦截）
  */
 @RestController
 @RequestMapping("/api/order")
@@ -34,6 +39,7 @@ import java.util.List;
 public class OrderController {
 
     private final OrderInfoService orderInfoService;
+    private final AllergyWarningService allergyWarningService;
 
     @GetMapping("/list")
     public ApiResponse<PageResult<OrderVO>> list(
@@ -93,5 +99,27 @@ public class OrderController {
     @GetMapping("/{id}/items")
     public ApiResponse<List<OrderItem>> orderItems(@PathVariable Long id) {
         return ApiResponse.success(orderInfoService.getOrderItems(id));
+    }
+
+    // ==================== 过敏/禁忌软警示（只提示，不拦截） ====================
+
+    /**
+     * 受控过敏原选项：学生侧禁忌与奶品侧过敏原**共用同一套编码**，
+     * 返回 `{code, text（奶品侧）, studentText（学生侧）}`，供管理端与小程序渲染多选项。
+     */
+    @GetMapping("/allergy-options")
+    public ApiResponse<List<AllergyOptionVO>> allergyOptions() {
+        return ApiResponse.success(allergyWarningService.options());
+    }
+
+    /**
+     * 下单前过敏/禁忌预检（数据范围与下单同口径）：返回命中清单，**空列表即无警示**。
+     *
+     * <p>刻意不拦截下单：命中只作为提示交用户确认（禁忌档案可能滞后，也可能家长明知而仍要买）。</p>
+     */
+    @GetMapping("/allergy-check")
+    public ApiResponse<List<AllergyWarningVO>> allergyCheck(@RequestParam Long studentId,
+                                                           @RequestParam List<Long> productIds) {
+        return ApiResponse.success(allergyWarningService.check(studentId, productIds));
     }
 }

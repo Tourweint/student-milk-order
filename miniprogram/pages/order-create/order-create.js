@@ -38,6 +38,7 @@ Page({
     total: 0,
     startDate: '',
     endDate: '',
+    minDate: '',            // 可选配送日期下界（今天）：过去日期服务端会拒绝，这里提前挡住
     quotaMap: {},
     quotaText: "—",
     totalBoxes: 0,
@@ -51,12 +52,14 @@ Page({
     this.targetId = Number(options.productId || options.packageId || 0)
     this.initQty = Number(options.qty) > 0 ? Number(options.qty) : 1
     const tomorrow = fmtDate(addDays(new Date(), 1))
+    const today = fmtDate(new Date())
     // 散订（奶品直购/购物车）为一次性配送：起止同日，按盒数展开一个配送任务；
     // 套餐（月度/学期）为周期配送：起止区间内每日配送，默认区间在加载套餐后按套餐类型填充
     this.setData({
       mode: this.mode,
       startDate: tomorrow,
-      endDate: tomorrow
+      endDate: tomorrow,
+      minDate: today
     })
     this.init()
   },
@@ -226,6 +229,10 @@ Page({
       wx.showToast({ title: '结束日期不能早于开始日期', icon: 'none' })
       return
     }
+    if (this.data.startDate < fmtDate(new Date())) {
+      wx.showToast({ title: '配送开始日期不能早于今天', icon: 'none' })
+      return
+    }
     // 提交前按当日余量校验（未设配额的品种不限制），避免下单后才被驳回
     for (let i = 0; i < items.length; i++) {
       const x = items[i]
@@ -234,6 +241,28 @@ Page({
         wx.showToast({ title: '「' + x.name + '」当日仅剩 ' + remaining + ' 盒，请调整数量', icon: 'none' })
         return
       }
+    }
+
+    // 过敏/禁忌软警示（警示优于拦截）：命中后由家长确认是否继续；
+    // 预检本身失败（网络/接口异常）**不阻断下单**——软警示的定位是提示，不是闸门
+    try {
+      const warnings = await orderApi.checkAllergy(
+        this.data.student.studentId, items.map((x) => x.productId))
+      if (warnings && warnings.length) {
+        const confirmed = await new Promise((resolve) => {
+          wx.showModal({
+            title: '过敏/禁忌提示',
+            content: warnings.map((w) => w.message).join('\n') + '\n\n系统只做提示，是否仍要下单？',
+            confirmText: '仍要下单',
+            cancelText: '返回修改',
+            success: (res) => resolve(res.confirm),
+            fail: () => resolve(false)
+          })
+        })
+        if (!confirmed) return
+      }
+    } catch (e) {
+      console.error('过敏预检失败（不影响下单）', e)
     }
 
     this.setData({ submitting: true })

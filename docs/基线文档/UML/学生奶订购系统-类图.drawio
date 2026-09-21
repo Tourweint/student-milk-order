@@ -1,0 +1,195 @@
+<mxfile host="app.diagrams.net" agent="openclaw" version="24.7.17" type="device">
+  <diagram id="class-01" name="类图">
+    <mxGraphModel dx="1900" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1060" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="学生奶订购系统 · 类图（23 个实体类 · 6 个领域包，与 src/main/java/com/milk/order/module/** 实体对应；过程迁移台账为多态关联）" style="text;html=1;align=left;verticalAlign=middle;fontSize=17;fontStyle=1;fontColor=#1F3864;" vertex="1" parent="1">
+          <mxGeometry x="40" y="22" width="1300" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgUser" value="用户与权限" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="420" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="SysUser" value="SysUser" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgUser">
+          <mxGeometry x="20" y="38" width="380" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="SysUser_a" value="id : Long · username : String&lt;br&gt;realName : String · phone : String&lt;br&gt;status : Integer · studentId : Long&lt;br&gt;classId : Long · openid : String" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="SysUser">
+          <mxGeometry y="28" width="380" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="SysRole" value="SysRole" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgUser">
+          <mxGeometry x="20" y="156" width="380" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="SysRole_a" value="id : Long · roleCode : String&lt;br&gt;roleName : String · status : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="SysRole">
+          <mxGeometry y="28" width="380" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="SysUserRole" value="SysUserRole" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgUser">
+          <mxGeometry x="20" y="240" width="380" height="52" as="geometry" />
+        </mxCell>
+        <mxCell id="SysUserRole_a" value="userId : Long · roleId : Long" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="SysUserRole">
+          <mxGeometry y="28" width="380" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgClazz" value="班级与学生" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="500" y="80" width="460" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="Grade" value="Grade" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgClazz">
+          <mxGeometry x="20" y="38" width="420" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="Grade_a" value="id : Long · gradeName : String&lt;br&gt;gradeCode : String · sort : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="Grade">
+          <mxGeometry y="28" width="420" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ClassInfo" value="ClassInfo" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgClazz">
+          <mxGeometry x="20" y="122" width="420" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="ClassInfo_a" value="id : Long · className : String&lt;br&gt;gradeId : Long · teacherId : Long&lt;br&gt;studentCount : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="ClassInfo">
+          <mxGeometry y="28" width="420" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="Student" value="Student" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgClazz">
+          <mxGeometry x="20" y="221" width="420" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="Student_a" value="id : Long · studentNo : String&lt;br&gt;studentName : String · gender : Integer&lt;br&gt;classId : Long · parentId : Long&lt;br&gt;parentName : String · parentPhone : String" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="Student">
+          <mxGeometry y="28" width="420" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgMilk" value="奶品管理" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="1000" y="80" width="720" height="445" as="geometry" />
+        </mxCell>
+        <mxCell id="ProductCategory" value="ProductCategory" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="20" y="38" width="330" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="ProductCategory_a" value="id : Long · categoryName : String&lt;br&gt;categoryCode : String · sort : Integer&lt;br&gt;status : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="ProductCategory">
+          <mxGeometry y="28" width="330" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="Product" value="Product" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="20" y="137" width="330" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="Product_a" value="id : Long · productName : String&lt;br&gt;categoryId : Long · spec : String&lt;br&gt;flavor : String · price : BigDecimal&lt;br&gt;status : Integer · nutritionId : Long" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="Product">
+          <mxGeometry y="28" width="330" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="MealPackage" value="MealPackage" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="20" y="251" width="330" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="MealPackage_a" value="id : Long · packageName : String&lt;br&gt;packageType : Integer · originalPrice&lt;br&gt;discountPrice · startDate · endDate&lt;br&gt;status : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="MealPackage">
+          <mxGeometry y="28" width="330" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="MealPackageItem" value="MealPackageItem" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="20" y="365" width="330" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="MealPackageItem_a" value="id : Long · packageId : Long&lt;br&gt;productId : Long · quantity : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="MealPackageItem">
+          <mxGeometry y="28" width="330" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="DailyQuota" value="DailyQuota" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="370" y="38" width="330" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="DailyQuota_a" value="id : Long · quotaDate : LocalDate&lt;br&gt;productId : Long · totalQuota&lt;br&gt;usedQuota : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="DailyQuota">
+          <mxGeometry y="28" width="330" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="DailyQuotaUsage" value="DailyQuotaUsage" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="370" y="137" width="330" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="DailyQuotaUsage_a" value="id : Long · orderId : Long&lt;br&gt;productId : Long · quotaDate&lt;br&gt;boxes : Integer" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="DailyQuotaUsage">
+          <mxGeometry y="28" width="330" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="NutritionInfo" value="NutritionInfo" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgMilk">
+          <mxGeometry x="370" y="236" width="330" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="NutritionInfo_a" value="id : Long · productId : Long&lt;br&gt;energy · protein · fat&lt;br&gt;calcium : BigDecimal" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="NutritionInfo">
+          <mxGeometry y="28" width="330" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgOrder" value="订单与支付" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="40" y="440" width="460" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="OrderInfo" value="OrderInfo" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgOrder">
+          <mxGeometry x="20" y="38" width="420" height="142" as="geometry" />
+        </mxCell>
+        <mxCell id="OrderInfo_a" value="id : Long · orderNo : String&lt;br&gt;studentId : Long · userId : Long&lt;br&gt;classId : Long · packageId : Long&lt;br&gt;orderType · status : Integer&lt;br&gt;totalAmount · payAmount : BigDecimal&lt;br&gt;deliveryStartDate · deliveryEndDate&lt;br&gt;payTime : LocalDateTime · transactionId" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="OrderInfo">
+          <mxGeometry y="28" width="420" height="114" as="geometry" />
+        </mxCell>
+        <mxCell id="OrderItem" value="OrderItem" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgOrder">
+          <mxGeometry x="20" y="198" width="420" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="OrderItem_a" value="id : Long · orderId : Long&lt;br&gt;productId : Long · productName : String&lt;br&gt;spec : String · price : BigDecimal&lt;br&gt;quantity : Integer · subtotal : BigDecimal" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="OrderItem">
+          <mxGeometry y="28" width="420" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="PaymentRecord" value="PaymentRecord" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgOrder">
+          <mxGeometry x="20" y="312" width="420" height="111" as="geometry" />
+        </mxCell>
+        <mxCell id="PaymentRecord_a" value="id : Long · orderId : Long&lt;br&gt;orderNo · transactionId : String&lt;br&gt;amount : BigDecimal · payType : Integer&lt;br&gt;status : Integer · payTime&lt;br&gt;userId : Long" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="PaymentRecord">
+          <mxGeometry y="28" width="420" height="83" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgDelivery" value="配送管理" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="540" y="440" width="480" height="410" as="geometry" />
+        </mxCell>
+        <mxCell id="DeliveryTask" value="DeliveryTask" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgDelivery">
+          <mxGeometry x="20" y="38" width="440" height="111" as="geometry" />
+        </mxCell>
+        <mxCell id="DeliveryTask_a" value="id : Long · taskNo : String&lt;br&gt;deliveryDate : LocalDate · classId : Long&lt;br&gt;orderId · studentId · productId : Long&lt;br&gt;quantity · status : Integer&lt;br&gt;dispatchBy : String · dispatchTime" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="DeliveryTask">
+          <mxGeometry y="28" width="440" height="83" as="geometry" />
+        </mxCell>
+        <mxCell id="DeliveryRecord" value="DeliveryRecord" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgDelivery">
+          <mxGeometry x="20" y="167" width="440" height="96" as="geometry" />
+        </mxCell>
+        <mxCell id="DeliveryRecord_a" value="id : Long · taskId : Long&lt;br&gt;studentId · productId : Long&lt;br&gt;quantity · signStatus : Integer&lt;br&gt;signTime : LocalDateTime · signPerson" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="DeliveryRecord">
+          <mxGeometry y="28" width="440" height="68" as="geometry" />
+        </mxCell>
+        <mxCell id="NutritionIntake" value="NutritionIntake" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgDelivery">
+          <mxGeometry x="20" y="281" width="440" height="111" as="geometry" />
+        </mxCell>
+        <mxCell id="NutritionIntake_a" value="id : Long · studentId : Long&lt;br&gt;intakeDate : LocalDate · productId : Long&lt;br&gt;quantity · energy : BigDecimal&lt;br&gt;protein · fat · calcium : BigDecimal&lt;br&gt;deliveryRecordId : Long" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="NutritionIntake">
+          <mxGeometry y="28" width="440" height="83" as="geometry" />
+        </mxCell>
+        <mxCell id="pkgSys" value="系统管理" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=center;fontSize=13;fontStyle=1;fillColor=#F7FAFF;strokeColor=#8EAADB;container=1;collapsible=0;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="440" width="660" height="490" as="geometry" />
+        </mxCell>
+        <mxCell id="OperationLog" value="OperationLog" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgSys">
+          <mxGeometry x="20" y="38" width="620" height="111" as="geometry" />
+        </mxCell>
+        <mxCell id="OperationLog_a" value="id : Long · username : String · operation : String&lt;br&gt;requestUrl : String · ip : String · costTime : Long&lt;br&gt;status : Integer · errorMsg : String&lt;br&gt;createTime : LocalDateTime" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="OperationLog">
+          <mxGeometry y="28" width="620" height="83" as="geometry" />
+        </mxCell>
+        <mxCell id="StateTransitionRule" value="StateTransitionRule" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgSys">
+          <mxGeometry x="20" y="167" width="620" height="81" as="geometry" />
+        </mxCell>
+        <mxCell id="StateTransitionRule_a" value="id : Long · scene : String · action : String&lt;br&gt;fromStatus · allowed : Integer&lt;br&gt;description : String" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="StateTransitionRule">
+          <mxGeometry y="28" width="620" height="53" as="geometry" />
+        </mxCell>
+        <mxCell id="SysConfig" value="SysConfig" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFFFF;fillColor=#F2F7FD;strokeColor=#2F5496;fontSize=12;" vertex="1" parent="pkgSys">
+          <mxGeometry x="20" y="266" width="620" height="66" as="geometry" />
+        </mxCell>
+        <mxCell id="SysConfig_a" value="id : Long · configKey : String&lt;br&gt;configValue : String · description : String" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="SysConfig">
+          <mxGeometry y="28" width="620" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ProcessTransitionLog" value="ProcessTransitionLog（过程迁移台账，只读）" style="swimlane;fontStyle=1;align=center;verticalAlign=top;childLayout=stackLayout;horizontal=1;startSize=28;horizontalStack=0;resizeParent=0;resizeParentMax=0;collapsible=0;swimlaneFillColor=#FFFDF5;fillColor=#FFF7E6;strokeColor=#C9A063;fontSize=12;" vertex="1" parent="pkgSys">
+          <mxGeometry x="20" y="350" width="620" height="126" as="geometry" />
+        </mxCell>
+        <mxCell id="ProcessTransitionLog_a" value="id : Long · scene · action : String&lt;br&gt;entityType : String · entityId : Long · bizNo : String&lt;br&gt;fromStatus · toStatus · result : Integer&lt;br&gt;operatorName : String · createTime : LocalDateTime" style="text;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=8;spacingRight=8;overflow=hidden;rotatable=0;whiteSpace=wrap;html=1;fontSize=10.5;" vertex="1" parent="ProcessTransitionLog">
+          <mxGeometry y="28" width="620" height="98" as="geometry" />
+        </mxCell>
+        <mxCell id="r1" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="SysUser" target="SysUserRole"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="SysRole" target="SysUserRole"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r3" value="0..1 → 0..*　家长绑定" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="SysUser" target="Student"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r4" value="1 → 0..1　班主任" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="ClassInfo" target="SysUser"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r5" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="Grade" target="ClassInfo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r6" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="ClassInfo" target="Student"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r7" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="ProductCategory" target="Product"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r8" value="1 → 0..1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="Product" target="NutritionInfo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r9" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="Product" target="MealPackageItem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r10" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="MealPackage" target="MealPackageItem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r11" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="Product" target="DailyQuota"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r12" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="Product" target="DailyQuotaUsage"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r13" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderInfo" target="OrderItem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r14" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderItem" target="Product"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r15" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderInfo" target="Student"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r16" value="0..* → 0..1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderInfo" target="MealPackage"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r17" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderInfo" target="PaymentRecord"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r18" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="OrderInfo" target="DeliveryTask"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r19" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="DeliveryTask" target="Product"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r20" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="DeliveryTask" target="Student"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r21" value="1 → 0..*" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="DeliveryTask" target="DeliveryRecord"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r22" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="DeliveryRecord" target="Product"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r23" value="0..* → 1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="NutritionIntake" target="Student"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r24" value="0..* → 1　配额台账" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#556580;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="DailyQuotaUsage" target="OrderInfo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r25" value="记录迁移（多态关联）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#C9A063;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="ProcessTransitionLog" target="OrderInfo"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r26" value="记录迁移（多态关联）" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;strokeColor=#C9A063;fontSize=10;labelBackgroundColor=#FFFFFF;endArrow=open;endFill=0;" edge="1" parent="1" source="ProcessTransitionLog" target="DeliveryTask"><mxGeometry relative="1" as="geometry" /></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

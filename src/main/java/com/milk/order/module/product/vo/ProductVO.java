@@ -41,6 +41,9 @@ public class ProductVO implements Serializable {
 
     private Long nutritionId;
 
+    /** 过敏原标签（受控编码的逗号分隔串，供下单前软警示与学生禁忌比对） */
+    private String allergenTags;
+
     private LocalDateTime createTime;
 
     public static ProductVO from(Product p, String categoryName) {
@@ -58,6 +61,7 @@ public class ProductVO implements Serializable {
         vo.setStatus(p.getStatus());
         vo.setSort(p.getSort());
         vo.setNutritionId(p.getNutritionId());
+        vo.setAllergenTags(p.getAllergenTags());
         vo.setCreateTime(p.getCreateTime());
         return vo;
     }

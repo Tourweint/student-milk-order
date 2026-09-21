@@ -47,6 +47,15 @@ public class OrderInfo extends BaseEntity {
     /** 优惠金额（元） */
     private BigDecimal discountAmount;
 
+    /**
+     * 合同总盒数：支付成功后展开配送任务时一次性快照（此后不变），作为退款金额的分母基准。
+     *
+     * <p>不能改用实时 {@code SUM(delivery_task.quantity)} 反推——平移/重排会 CAS 作废任务但保留行、
+     * 拒收补送会加量或新建任务（免费盒，不额外收钱）、期末摊平会重写 quantity，
+     * 三者都会让实时求和漂移，进而算错退款比例。</p>
+     */
+    private Integer contractTotalBoxes;
+
     /** 配送开始日期 */
     private LocalDate deliveryStartDate;
 

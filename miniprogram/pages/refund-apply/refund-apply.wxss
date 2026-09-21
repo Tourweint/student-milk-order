@@ -1,0 +1,67 @@
+/* 明细行（与订单详情页同款视觉） */
+.row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12rpx 0;
+  font-size: 28rpx;
+}
+.row-label {
+  color: #909399;
+}
+.row-value {
+  color: #303133;
+  max-width: 70%;
+  text-align: right;
+}
+
+.tip {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: #909399;
+  line-height: 1.6;
+}
+.tip-warn {
+  color: #e6a23c;
+}
+
+/* 可退期次 */
+.task {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 0;
+  border-bottom: 1rpx solid #f2f3f5;
+}
+.task:last-child {
+  border-bottom: none;
+}
+.task-date {
+  font-size: 28rpx;
+  color: #303133;
+}
+.task-meta {
+  margin-top: 6rpx;
+  font-size: 24rpx;
+  color: #909399;
+}
+.task-boxes {
+  font-size: 28rpx;
+  color: #409eff;
+  font-weight: 600;
+}
+
+/* 表单 */
+.form-textarea {
+  width: 100%;
+  height: 160rpx;
+  background: #ffffff;
+  border: 1rpx solid #dcdfe6;
+  border-radius: 10rpx;
+  padding: 16rpx 20rpx;
+  font-size: 28rpx;
+  box-sizing: border-box;
+}
+
+.submit-btn {
+  margin: 8rpx 0 40rpx;
+}

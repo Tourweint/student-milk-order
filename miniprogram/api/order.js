@@ -33,10 +33,28 @@ function cancelOrder(id, reason) {
   return put('/order/cancel/' + id, null, { reason })
 }
 
+/**
+ * 过敏/禁忌预检（只提示不拦截）：返回命中清单，空数组表示无警示。
+ * productIds 逗号拼接——后端是 `@RequestParam List<Long>`，只认重复参数或逗号分隔值。
+ */
+function checkAllergy(studentId, productIds) {
+  return get('/order/allergy-check', {
+    studentId,
+    productIds: (productIds || []).join(',')
+  })
+}
+
+/** 受控过敏原选项（学生侧禁忌与奶品侧过敏原共用一套编码） */
+function getAllergyOptions() {
+  return get('/order/allergy-options')
+}
+
 module.exports = {
   getOrderList,
   getOrderDetail,
   getPayResult,
   createOrder,
-  cancelOrder
+  cancelOrder,
+  checkAllergy,
+  getAllergyOptions
 }

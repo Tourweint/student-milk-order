@@ -23,6 +23,7 @@
         <el-date-picker
           v-model="deliveryRange" type="daterange" range-separator="至"
           start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD"
+          :disabled-date="disabledDate"
           class="full-width"
         />
       </el-form-item>
@@ -56,8 +57,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { Plus, Delete } from '@element-plus/icons-vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { createOrder } from '@/api/order'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { createOrder, checkAllergy } from '@/api/order'
 import { getStudentList } from '@/api/student'
 import { getProductList, getPackageList } from '@/api/product'
 
@@ -115,6 +116,20 @@ const rules: FormRules = {
   }]
 }
 
+/** 禁止选择今天之前的日期：过去日期会补造历史配送任务并被自动签收兜底签掉（服务端同样校验） */
+function disabledDate(date: Date) {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return date.getTime() < today.getTime()
+}
+
+/** 今天（YYYY-MM-DD），用于提交前的字符串比较校验 */
+function todayStr() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
 function addItem() {
   form.items.push({ productId: undefined, quantity: 1 })
 }
@@ -144,6 +159,29 @@ async function handleSubmit() {
   if (!deliveryRange.value) {
     ElMessage.warning('请选择配送日期')
     return
+  }
+  if (deliveryRange.value[0] < todayStr()) {
+    ElMessage.warning('配送开始日期不能早于今天')
+    return
+  }
+  // 过敏/禁忌软警示（警示优于拦截）：提交前预检，命中则让用户确认；预检本身失败不阻断下单
+  const productIds = form.items.map((i) => i.productId).filter((x): x is number => !!x)
+  try {
+    const res: any = await checkAllergy({ studentId: form.studentId!, productIds })
+    const warnings: any[] = res?.data ?? []
+    if (warnings.length) {
+      await ElMessageBox.confirm(
+        warnings.map((w) => w.message).join('\n') + '\n\n系统只做提示，是否仍要为该学生下单？',
+        '过敏/禁忌提示',
+        { confirmButtonText: '仍要下单', cancelButtonText: '返回修改', type: 'warning' }
+      )
+    }
+  } catch (e: any) {
+    if (e === 'cancel' || e === 'close') {
+      return // 用户在警示弹窗选择"返回修改"
+    }
+    // 预检本身异常（如网络/接口问题）不得阻断下单：软警示的定位是"提示"，不是闸门
+    console.error('过敏预检失败（不影响下单）', e)
   }
   submitting.value = true
   try {

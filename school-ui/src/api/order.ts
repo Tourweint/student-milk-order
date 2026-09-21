@@ -37,3 +37,23 @@ export function cancelOrder(id: number, reason?: string) {
 export function completeOrder(id: number) {
   return put(`/order/complete/${id}`)
 }
+
+// ==================== 过敏/禁忌软警示（只提示，不拦截） ====================
+
+/** 受控过敏原选项（学生禁忌与奶品过敏原共用一套编码；含两侧文案） */
+export function getAllergyOptions() {
+  return get('/order/allergy-options')
+}
+
+/**
+ * 下单前预检：命中清单（空数组 = 无警示）。
+ *
+ * productIds 用逗号拼接：axios 默认把数组序列化成 `productIds[]=1&productIds[]=2`，
+ * Spring 的 `@RequestParam List<Long>` 只认重复参数或逗号分隔值，因此这里显式拼串。
+ */
+export function checkAllergy(params: { studentId: number; productIds: number[] }) {
+  return get('/order/allergy-check', {
+    studentId: params.studentId,
+    productIds: params.productIds.join(',')
+  })
+}

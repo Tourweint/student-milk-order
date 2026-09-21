@@ -24,6 +24,8 @@ public final class StateTransitions {
      * 只做 CAS 条件更新与迁移留痕，见 TransitionSpec.ruleGoverned=false。</p>
      */
     public static final String SCENE_DELIVERY_RECORD = "DELIVERY_RECORD";
+    /** 退款单状态机（refund_order.status）：退款域父过程，1待审核→2已审核待退款→3已退款 / →4已拒绝 */
+    public static final String SCENE_REFUND = "REFUND";
 
     // ==================== 订单动作 ====================
 
@@ -50,4 +52,12 @@ public final class StateTransitions {
     public static final String ACTION_REJECT = "REJECT";
     /** 缺货批量取消（仅待配送→已取消；已完成任务禁止回退） */
     public static final String ACTION_STOCKOUT_CANCEL = "STOCKOUT_CANCEL";
+
+    // ==================== 退款单动作（场景 REFUND） ====================
+
+    /** 退款审核通过（待审核→已审核待退款） */
+    public static final String ACTION_AUDIT = "AUDIT";
+    /** 退款执行（已审核待退款→已退款）：涉资金，调用方必须用 require，禁止 attempt 静默跳过 */
+    public static final String ACTION_EXECUTE = "EXECUTE";
+    // 退款拒绝（待审核→已拒绝）复用配送侧动作码 {@link #ACTION_REJECT}（"REJECT"），不另立常量
 }

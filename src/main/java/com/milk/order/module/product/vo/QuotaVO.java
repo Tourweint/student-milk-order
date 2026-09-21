@@ -25,6 +25,9 @@ public class QuotaVO implements Serializable {
     /** 已售盒数 */
     private Integer usedQuota;
 
-    /** 剩余盒数（含保质期内结转） */
+    /** 剩余盒数（含计划顺延窗口内结转） */
     private Integer remaining;
+
+    /** 可选：当日该品种到货批次号（批次追溯钩子，仅作标注，不参与扣减/结转） */
+    private String batchNo;
 }

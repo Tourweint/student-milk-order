@@ -25,6 +25,16 @@
       </span>
     </div>
 
+    <!-- 未送达申报待跟进：这些任务被排除出自动签收候选集，必须人工处置 -->
+    <div v-if="pendingReportTotal > 0" class="pending-bar report-bar">
+      <el-icon class="pending-icon"><Warning /></el-icon>
+      <span class="pending-text">
+        {{ queryDate }} 有 <b>{{ pendingReportTotal }}</b> 条「未送达申报」待跟进：这些任务<b>不会</b>被次日自动签收兜底签掉，
+        请核实后走签收 / 拒收 / 取消处置（申报只做标记，不改变任务状态）。
+      </span>
+      <el-button size="small" @click="switchToReportTab">去跟进</el-button>
+    </div>
+
     <!-- 按班级汇总概览 -->
     <el-table v-loading="summaryLoading" :data="summaryList" stripe class="summary-table">
       <el-table-column prop="className" label="班级" min-width="140">
@@ -92,9 +102,10 @@
           <el-table-column label="派送时间" min-width="160">
             <template #default="{ row }">{{ row.dispatchTime || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column label="操作" width="190" fixed="right">
             <template #default="{ row }">
               <el-button v-if="row.status === 1" link type="primary" @click="handleStartOne(row)">开始配送</el-button>
+              <el-button v-if="row.status === 2" link type="warning" @click="reportUndeliveredTask(row)">申报未送达</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -143,18 +154,73 @@
           />
         </div>
       </el-tab-pane>
+
+      <!-- 未送达申报：待跟进待办（申报后任务不会被自动签收兜底签掉） -->
+      <el-tab-pane label="未送达申报" name="report">
+        <div class="toolbar sub-toolbar">
+          <el-select v-model="reportQuery.handleStatus" placeholder="全部（待跟进+已跟进）" clearable class="status-item" @change="fetchReports">
+            <el-option label="待跟进" :value="0" />
+            <el-option label="已跟进" :value="1" />
+          </el-select>
+          <el-checkbox v-model="reportAllDates" @change="fetchReports">不限配送日（默认只看当前日期）</el-checkbox>
+          <el-button type="primary" @click="fetchReports">查询</el-button>
+          <el-button @click="resetReportQuery">重置</el-button>
+          <span class="tip">申报只做标记：任务仍停留在「配送中」，处置必须走签收 / 拒收 / 取消</span>
+        </div>
+        <el-table v-loading="reportLoading" :data="reportList" stripe>
+          <el-table-column prop="deliveryDate" label="配送日期" width="110" />
+          <el-table-column prop="className" label="班级" width="110" />
+          <el-table-column prop="studentName" label="学生" width="90" />
+          <el-table-column prop="productName" label="奶品" min-width="110" />
+          <el-table-column prop="quantity" label="数量" width="70" />
+          <el-table-column prop="taskNo" label="任务编号" min-width="170" />
+          <el-table-column prop="reason" label="未送达原因" min-width="160" show-overflow-tooltip />
+          <el-table-column label="申报人 / 时间" min-width="160">
+            <template #default="{ row }">{{ row.reportBy || '—' }} / {{ row.reportTime || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="任务状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="taskStatusTag(row.taskStatus)" size="small">{{ taskStatusText(row.taskStatus) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="跟进" width="230" fixed="right">
+            <template #default="{ row }">
+              <template v-if="row.handleStatus === 0">
+                <el-button link type="warning" @click="goHandleTask(row)">去处置任务</el-button>
+                <el-button v-if="isAdmin" link type="primary" @click="handleReport(row)">标记已跟进</el-button>
+              </template>
+              <span v-else class="handled-text">
+                {{ row.handleBy || '—' }} 已跟进{{ row.handleRemark ? '：' + row.handleRemark : '' }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="pagination">
+          <el-pagination
+            v-model:current-page="reportQuery.pageNum"
+            v-model:page-size="reportQuery.pageSize"
+            :total="reportTotal"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            @size-change="fetchReports"
+            @current-change="fetchReports"
+          />
+        </div>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, Warning } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getDailyTaskSummary, getDeliveryTaskList, getDeliveryRecordList,
-  batchStartDeliveryTasks, startDeliveryTask
+  batchStartDeliveryTasks, startDeliveryTask,
+  reportUndelivered, getUndeliveredReportList, handleUndeliveredReport
 } from '@/api/delivery'
+import { useUserStore } from '@/stores/user'
 
 /** 某配送日期按班级汇总（后端 /delivery/task/summary） */
 interface DailySummary {
@@ -221,6 +287,20 @@ const recordLoading = ref(false)
 const recordList = ref<DeliveryRecordRow[]>([])
 const recordTotal = ref(0)
 const recordQuery = reactive({ pageNum: 1, pageSize: 10 })
+
+/** 未送达申报待办（只有 ADMIN 能标记已跟进；申报由 ADMIN/DELIVERY 发起） */
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.roles.includes('ADMIN'))
+const reportLoading = ref(false)
+const reportList = ref<any[]>([])
+const reportTotal = ref(0)
+const pendingReportTotal = ref(0)
+const reportAllDates = ref(false)
+const reportQuery = reactive({
+  pageNum: 1,
+  pageSize: 10,
+  handleStatus: undefined as number | undefined
+})
 
 const dispatching = ref(false)
 
@@ -293,10 +373,107 @@ function resetTaskQuery() {
   fetchTasks()
 }
 
+async function fetchReports() {
+  reportLoading.value = true
+  try {
+    const res: any = await getUndeliveredReportList({
+      pageNum: reportQuery.pageNum,
+      pageSize: reportQuery.pageSize,
+      handleStatus: reportQuery.handleStatus,
+      deliveryDate: reportAllDates.value ? undefined : queryDate.value
+    })
+    reportList.value = res.data.list
+    reportTotal.value = Number(res.data.total)
+  } finally {
+    reportLoading.value = false
+  }
+}
+
+/** 顶部提醒条：当前配送日的「待跟进」条数 */
+async function fetchPendingReportTotal() {
+  try {
+    const res: any = await getUndeliveredReportList({
+      pageNum: 1,
+      pageSize: 1,
+      deliveryDate: queryDate.value,
+      handleStatus: 0
+    })
+    pendingReportTotal.value = Number(res.data.total)
+  } catch {
+    pendingReportTotal.value = 0
+  }
+}
+
+function resetReportQuery() {
+  reportQuery.handleStatus = undefined
+  reportQuery.pageNum = 1
+  reportAllDates.value = false
+  fetchReports()
+}
+
+function switchToReportTab() {
+  activeTab.value = 'report'
+  fetchReports()
+}
+
+/** 从申报待办跳到配送任务页并按订单号定位，便于直接走签收/拒收/取消处置 */
+function goHandleTask(row: any) {
+  activeTab.value = 'task'
+  taskRange.value = null
+  taskQuery.orderNo = row.orderNo || ''
+  taskQuery.status = undefined
+  taskQuery.pageNum = 1
+  fetchTasks()
+}
+
+/** 奶站申报「当日未送达」：任务被标记已送出但物理上没送到 */
+async function reportUndeliveredTask(row: DeliveryTaskRow) {
+  let reason: string
+  try {
+    const res = await ElMessageBox.prompt(
+      `任务「${row.taskNo}」（${row.deliveryDate} ${row.studentName || ''} ${row.productName || ''}）已标记送出但实际未送达。` +
+      '申报后该任务不会被自动签收兜底签掉，请填写具体原因：',
+      '未送达申报',
+      { confirmButtonText: '提交申报', cancelButtonText: '取消', inputPlaceholder: '如：车辆故障 / 道路中断 / 奶未备齐' }
+    )
+    reason = String(res.value || '').trim()
+  } catch {
+    return
+  }
+  if (!reason) {
+    ElMessage.warning('请填写未送达原因')
+    return
+  }
+  await reportUndelivered({ taskId: row.id, reason })
+  ElMessage.success('已申报未送达，该任务不会被自动签收兜底')
+  refresh()
+}
+
+/** 标记已跟进（仅 ADMIN）：只写跟进说明，任务状态不变 */
+async function handleReport(row: any) {
+  let remark: string
+  try {
+    const res = await ElMessageBox.prompt(
+      `确认「${row.taskNo}」已人工处置完毕？请填写处置说明（如：已线下补送 / 已取消并回补）：`,
+      '标记已跟进',
+      { confirmButtonText: '确认', cancelButtonText: '取消', inputPlaceholder: '处置说明' }
+    )
+    remark = String(res.value || '').trim()
+  } catch {
+    return
+  }
+  await handleUndeliveredReport(row.id, remark)
+  ElMessage.success('已标记跟进')
+  fetchReports()
+  fetchPendingReportTotal()
+}
+
 function refresh() {
   fetchSummary()
   fetchRecords()
   fetchTasks()
+  fetchReports()
+  fetchPendingReportTotal()
 }
 
 /** 今日已送出：批量开始当日配送，之后相关订单不可退订 */
@@ -374,6 +551,18 @@ onMounted(refresh)
 .station-tabs {
   margin-top: 8px;
   :deep(.el-tab-pane) { padding-top: 4px; }
+}
+/* 未送达申报提醒：比"待签收"更严重（兜底不会兜它），用红色区分 */
+.report-bar {
+  background: #fdeaea;
+  border-color: #f3bcbc;
+  .pending-icon { color: #f56c6c; }
+  .pending-text { color: #a33; }
+  b { color: #d32f2f; }
+}
+.handled-text {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .pagination { margin-top: 16px; display: flex; justify-content: flex-end; }
 </style>

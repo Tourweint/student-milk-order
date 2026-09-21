@@ -38,6 +38,8 @@
             <view class="action-btn action-primary" catchtap="handlePay" data-id="{{item.id}}">去支付</view>
           </block>
           <view wx:if="{{item.status === 2}}" class="action-btn" catchtap="handleCancel" data-id="{{item.id}}">退订</view>
+          <!-- 已支付/配送中/已完成均可按期次退款（可退期次由后端判定） -->
+          <view wx:if="{{item.status >= 2 && item.status <= 4}}" class="action-btn action-primary" catchtap="goRefundApply" data-id="{{item.id}}">退款</view>
         </view>
       </view>
     </view>

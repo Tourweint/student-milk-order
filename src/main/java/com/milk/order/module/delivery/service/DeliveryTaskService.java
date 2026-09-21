@@ -9,8 +9,10 @@ import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.ParentExemptionVO;
 import com.milk.order.module.delivery.vo.ParentHomeVO;
 import com.milk.order.module.delivery.vo.PendingSignVO;
+import com.milk.order.module.delivery.vo.RefundableTaskVO;
 import com.milk.order.module.delivery.vo.ShiftResultVO;
 import com.milk.order.module.order.entity.OrderInfo;
 
@@ -98,6 +100,27 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
     int cancelPendingTasksForOrder(Long orderId);
 
     /**
+     * 退款可退期次（R1 口径，只读探测）：订单的「待配送(1)」任务 ∪ 「缺货取消」任务
+     * （任务已取消(4) 且签收记录为拒收(3) 且未写 reject_reason_code —— 与 INV_TASK_COMPENSATION 同判据，
+     * 缺货取消没送奶、钱应退）；真拒收（有原因分类，已补送）与平移/重排作废的任务不计入。
+     *
+     * <p>订单已退订(5) 时返回空：退订联动作废的任务同样"签收=拒收且无原因分类"，计入会与退订的
+     * 全额退款（R4）重复退钱。已配送/已完成的期次不在此列，天然不可退。</p>
+     *
+     * <p>可退盒数已扣除拒收补送的免费盒（见 {@link RefundableTaskVO#getRefundableBoxes()}）。</p>
+     */
+    List<RefundableTaskVO> listRefundableTasks(Long orderId);
+
+    /**
+     * 退款作废单条待配送任务（R1/R3）：走统一迁移出口 {@code attempt(TASK_CANCEL, 1→4)}，
+     * 返回 false 表示 CAS 落败（任务已被并发送出/取消），调用方须将其剔除、不参与计价。
+     *
+     * <p>作废后签收记录保持「未签收」、仅标注备注：置为拒收(3) 会让该任务在 R1 判据下
+     * 重新变成"缺货取消"从而可退第二次。</p>
+     */
+    boolean cancelTaskForRefund(Long taskId, String refundNo);
+
+    /**
      * 拒收（未签收→拒收，任务→已取消），并在同一事务内按订单类型落拒收补送；仅可拒收已开始配送（已送出）的任务。
      *
      * @param reasonCode   拒收原因分类（DAMAGED/SOUR/WRONG_PRODUCT/SHORTAGE/OTHER，可空）
@@ -153,13 +176,18 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
 
     /**
      * 自动签收兜底候选：返回配送日期早于 today、任务已送出（配送中）且记录未签收的配送记录 ID。
-     * 供次日凌晨定时任务批量调用（单条独立事务处理，单条失败不影响其余）。
+     *
+     * <p><b>已被奶站申报「未送达」的任务不在候选集内</b>（见 {@code DeliveryUndeliveredReport}）：
+     * 兜底窗口判定用的是信息态（配送站点了"已送出"），申报表达的是物理态（奶没到校），
+     * 两者混同会签出虚假签收与营养摄入。</p>
+     *
+     * <p>供次日凌晨定时任务批量调用（单条独立事务处理，单条失败不影响其余）。</p>
      */
     List<Long> listExpiredAutoSignRecordIds(int limit);
 
     /**
      * 单条自动签收（独立事务、幂等）：仅签收「配送日期早于 today + 任务已送出 + 记录未签收」的记录，
-     * 签收人标记为系统自动签收；不满足任一前置条件（含已处理）静默跳过，不抛异常。
+     * 签收人标记为系统自动签收；不满足任一前置条件（含已处理、**已被申报未送达**）静默跳过，不抛异常。
      */
     void autoSignOne(Long recordId);
 
@@ -168,4 +196,19 @@ public interface DeliveryTaskService extends IService<DeliveryTask> {
      * 班主任数据范围强制限定本班，管理员/配送站可看全部班级。返回 total 与班级明细。
      */
     PendingSignVO pendingSign(String deliveryDate);
+
+    /**
+     * 家长端「当日豁免」概览：今天可豁免的待配送任务数与本月剩余次数（仅家长，数据范围为绑定学生）。
+     * 供小程序在下单/首页判断按钮是否可用，避免点进去才被拒。
+     */
+    ParentExemptionVO parentExemptionOverview();
+
+    /**
+     * 家长端「当日豁免」：取消该学生**今天尚未送出**（待配送）的全部任务。
+     *
+     * <p>口径：上限按「学生 × 自然月」计（`delivery.parent.exemption.monthly-limit`，默认 3，配 0 即关闭），
+     * 次数与取消在**同一事务**内（取消失败则次数自动回退）；取消复用统一迁移出口（规则闸门 + CAS + 台账留痕 +
+     * 父过程自愈待办）；零散订购的配额按台账回补原池。</p>
+     */
+    ParentExemptionVO parentExemptToday(String reason);
 }

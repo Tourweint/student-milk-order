@@ -129,3 +129,30 @@ export function rejectDeliveryRecord(params: {
 export function getPendingSign(deliveryDate?: string) {
   return get('/delivery/record/pending-sign', { deliveryDate })
 }
+
+// ==================== 奶站「当日未送达申报」 ====================
+
+/**
+ * 申报某任务当日未送达（ADMIN / DELIVERY）。
+ * 该任务已被标记「已送出」但物理上没送到：申报后它被排除出自动签收兜底候选集，
+ * 并进入待跟进列表；申报本身不改任何任务/订单状态。
+ */
+export function reportUndelivered(data: { taskId: number; reason: string }) {
+  return post('/delivery/task/undelivered-report', data)
+}
+
+/** 未送达申报待跟进列表（班主任限本班） */
+export function getUndeliveredReportList(params: {
+  pageNum: number
+  pageSize: number
+  deliveryDate?: string
+  handleStatus?: number
+  classId?: number
+}) {
+  return get('/delivery/task/undelivered-report/list', params)
+}
+
+/** 标记已跟进（仅 ADMIN）：只写跟进说明，实际处置仍走签收/拒收/取消出口 */
+export function handleUndeliveredReport(id: number, remark?: string) {
+  return put(`/delivery/task/undelivered-report/${id}/handle`, null, { params: { remark } })
+}

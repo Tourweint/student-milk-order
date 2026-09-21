@@ -18,6 +18,11 @@
       <view class="menu-text">我的订单</view>
       <view class="menu-arrow">›</view>
     </view>
+    <view class="menu-item" bindtap="goPage" data-name="我的退款单" data-url="/pages/refund-list/refund-list">
+      <view class="menu-icon">💰</view>
+      <view class="menu-text">我的退款单</view>
+      <view class="menu-arrow">›</view>
+    </view>
     <view class="menu-item" bindtap="goPage" data-name="营养统计" data-url="/pages/nutrition/nutrition">
       <view class="menu-icon">🍎</view>
       <view class="menu-text">营养统计</view>

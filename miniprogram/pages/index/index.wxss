@@ -225,3 +225,35 @@
   padding: 6rpx 20rpx;
   display: inline-block;
 }
+
+/* 当日豁免卡片：今天还有未送出的奶时才出现（病假/外出临时不要） */
+.exempt-card {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  border-left: 6rpx solid #e6a23c;
+}
+
+.exempt-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.exempt-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #333;
+}
+
+.exempt-tip {
+  font-size: 22rpx;
+  color: #999;
+  line-height: 1.5;
+}
+
+.exempt-btn {
+  flex-shrink: 0;
+  margin: 0;
+}

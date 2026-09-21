@@ -18,18 +18,23 @@ import com.milk.order.module.delivery.dto.SignRequest;
 import com.milk.order.module.delivery.dto.StockoutCancelRequest;
 import com.milk.order.module.delivery.entity.DeliveryCompensation;
 import com.milk.order.module.delivery.entity.DeliveryException;
+import com.milk.order.module.delivery.entity.DeliveryParentExemption;
 import com.milk.order.module.delivery.entity.DeliveryRecord;
 import com.milk.order.module.delivery.entity.DeliveryTask;
 import com.milk.order.module.delivery.mapper.DeliveryCompensationMapper;
 import com.milk.order.module.delivery.mapper.DeliveryExceptionMapper;
+import com.milk.order.module.delivery.mapper.DeliveryParentExemptionMapper;
 import com.milk.order.module.delivery.mapper.DeliveryRecordMapper;
 import com.milk.order.module.delivery.mapper.DeliveryTaskMapper;
+import com.milk.order.module.delivery.mapper.DeliveryUndeliveredReportMapper;
 import com.milk.order.module.delivery.service.DeliveryTaskService;
 import com.milk.order.module.delivery.vo.DailyDispatchSummaryVO;
 import com.milk.order.module.delivery.vo.DeliveryRecordVO;
 import com.milk.order.module.delivery.vo.DeliveryTaskVO;
+import com.milk.order.module.delivery.vo.ParentExemptionVO;
 import com.milk.order.module.delivery.vo.ParentHomeVO;
 import com.milk.order.module.delivery.vo.PendingSignVO;
+import com.milk.order.module.delivery.vo.RefundableTaskVO;
 import com.milk.order.module.delivery.vo.ShiftResultVO;
 
 import com.milk.order.module.product.service.DailyQuotaService;
@@ -90,6 +95,10 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     private final ProcessPendingTaskService pendingTaskService;
     private final DeliveryCompensationMapper deliveryCompensationMapper;
     private final DeliveryExceptionMapper deliveryExceptionMapper;
+    /** 未送达申报（自动签收兜底必须排除被申报的任务，避免把"没送到"签成"已签收"） */
+    private final DeliveryUndeliveredReportMapper undeliveredReportMapper;
+    /** 家长端「当日豁免」次数台账（学生 × 自然月一行计数器） */
+    private final DeliveryParentExemptionMapper parentExemptionMapper;
     private final SysConfigService sysConfigService;
 
     /**
@@ -175,11 +184,42 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (demandByProduct.isEmpty()) {
             return 0;
         }
+        // 首次展开任务时快照「合同总盒数」（退款金额分母基准，只写一次，见方法注释）
+        snapshotContractTotalBoxes(order, demandByProduct, start, end);
         int count = 0;
         for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
             count += createTasksForDate(order, date, demandByProduct);
         }
         return count;
+    }
+
+    /**
+     * 快照「合同总盒数」到 {@code order_info.contract_total_boxes}（退款金额的分母基准）。
+     *
+     * <p>必须快照而不能在退款时实时求和：平移/重排会把源任务 CAS 作废但保留行、拒收补送会加量或新建任务
+     * （免费盒，不额外收费）、期末摊平会重写 quantity —— 三者都会让实时 {@code SUM(quantity)} 漂移，
+     * 分母一变退款比例就算错。</p>
+     *
+     * <p>取值由「每日需求盒数 × 配送天数」确定性推导，与任务是否已存在无关，因此支付回调重复到达、
+     * 不变量补网格（{@link #generateTasksForOrder}）再次调用时都不会写出第二个值；
+     * 只在列为空时写入一次（条件更新 {@code IS NULL}，多实例并发下也只有一个值落库）。</p>
+     */
+    private void snapshotContractTotalBoxes(OrderInfo order, Map<Long, Integer> demandByProduct,
+                                            LocalDate start, LocalDate end) {
+        if (order.getContractTotalBoxes() != null) {
+            return;
+        }
+        int dailyBoxes = demandByProduct.values().stream().mapToInt(Integer::intValue).sum();
+        long days = end.toEpochDay() - start.toEpochDay() + 1;
+        long total = dailyBoxes * days;
+        if (total <= 0) {
+            return;
+        }
+        orderInfoMapper.update(null, new LambdaUpdateWrapper<OrderInfo>()
+                .eq(OrderInfo::getId, order.getId())
+                .isNull(OrderInfo::getContractTotalBoxes)
+                .set(OrderInfo::getContractTotalBoxes, (int) total));
+        order.setContractTotalBoxes((int) total);
     }
 
     /** 为单个订单展开某一日期的任务（generateTasks 手工补生成复用） */
@@ -404,10 +444,19 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
     @Transactional(rollbackFor = Exception.class)
     public void cancelTask(Long taskId, String reason) {
         DeliveryTask task = getTask(taskId);
-        String cancelReason = StringUtils.hasText(reason) ? reason : task.getRemark();
-        // 过程层严格迁移：规则表白名单（待配送/配送中可取消，已完成/已取消禁止）替代原先硬编码判断；
-        // CAS 以读取时的来源状态为条件，与并发签收/开始配送竞争，仅一方生效——
-        // 否则「读状态→判断→全量更新」会让已完成(3)的任务被并发取消回退为已取消(4)
+        doCancelTask(task, StringUtils.hasText(reason) ? reason : task.getRemark());
+    }
+
+    /**
+     * 任务取消的统一落账（供 {@code cancelTask} 与家长端「当日豁免」共用）。
+     *
+     * <p>调用方须已在事务中（含前置校验与数据权限校验）。过程层严格迁移：规则表白名单
+     * （待配送/配送中可取消，已完成/已取消禁止）替代原先硬编码判断；CAS 以读取时的来源状态为条件，
+     * 与并发签收/开始配送竞争，仅一方生效——否则「读状态→判断→全量更新」会让已完成(3)的任务
+     * 被并发取消回退为已取消(4)。</p>
+     */
+    private void doCancelTask(DeliveryTask task, String cancelReason) {
+        Long taskId = task.getId();
         processTransitionExecutor.require(
                 TransitionSpec.builder()
                         .scene(StateTransitions.SCENE_DELIVERY_TASK)
@@ -433,6 +482,141 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         markRecordRejected(taskId, "任务已取消");
         // 任务全部到达终态时自动完成订单（父状态聚合出口）
         orderInfoService.completeOrderIfAllTasksDone(task.getOrderId());
+    }
+
+    // ==================== 家长端「当日豁免」 ====================
+
+    /** 「当日豁免」每月次数上限配置键（sys_config，管理端可在线修改；配成 0 即关闭该能力） */
+    private static final String CONFIG_PARENT_EXEMPTION_LIMIT = "delivery.parent.exemption.monthly-limit";
+
+    /** 月键格式（豁免次数按学生 × 自然月计数） */
+    private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
+
+    @Override
+    public ParentExemptionVO parentExemptionOverview() {
+        Long studentId = currentParentStudentId();
+        LocalDate today = LocalDate.now();
+        int limit = parentExemptionMonthlyLimit();
+        int used = currentExemptionUsed(studentId, today);
+        ParentExemptionVO vo = new ParentExemptionVO();
+        vo.setDeliveryDate(today);
+        vo.setExemptableCount(listTodayPendingTasks(studentId, today).size());
+        vo.setMonthlyLimit(limit);
+        vo.setUsedCount(used);
+        vo.setRemaining(Math.max(0, limit - used));
+        return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ParentExemptionVO parentExemptToday(String reason) {
+        Long studentId = currentParentStudentId();
+        LocalDate today = LocalDate.now();
+        int limit = parentExemptionMonthlyLimit();
+        if (limit <= 0) {
+            throw new BusinessException("家长端「当日豁免」未开放（次数上限为 0），如需使用请联系学校管理员");
+        }
+        // 只豁免「今天 + 尚未送出（待配送）」的任务：已送出的奶在途，取消等于把已出库的奶从记录里抹掉
+        List<DeliveryTask> tasks = listTodayPendingTasks(studentId, today);
+        if (tasks.isEmpty()) {
+            throw new BusinessException("今天没有可豁免的待配送任务（可能已送出或本就无配送）");
+        }
+        // 先抢次数（行锁 + 条件更新），再执行取消：次数与取消同事务，取消失败则次数自动回退
+        int used = consumeExemptionQuota(studentId, today, limit);
+        String cancelReason = StringUtils.hasText(reason) ? reason : "家长当日豁免";
+        for (DeliveryTask task : tasks) {
+            // 逐条走同一取消出口：规则闸门 + CAS + 迁移台账留痕 + 父过程自愈待办
+            doCancelTask(task, cancelReason);
+        }
+        // 配额按台账回补原池（零散订购才有扣减台账；学期套餐不占配额，此处自动 no-op）。
+        // 按 (订单, 品种) 去重：同一订单同一品种可能有多条任务，回补口径是"订单×品种"整份（与缺货取消一致）
+        Set<String> restoredKeys = new HashSet<>();
+        for (DeliveryTask task : tasks) {
+            if (task.getOrderId() == null || task.getProductId() == null) {
+                continue;
+            }
+            if (restoredKeys.add(task.getOrderId() + "#" + task.getProductId())) {
+                dailyQuotaService.restoreForOrderProductDate(task.getOrderId(), task.getProductId(), task.getDeliveryDate());
+            }
+        }
+        log.warn(String.format("[当日豁免] 学生 %s 豁免 %s 的 %d 条待配送任务（本月第 %d/%d 次）：%s",
+                studentId, today, tasks.size(), used, limit, cancelReason));
+        ParentExemptionVO vo = new ParentExemptionVO();
+        vo.setDeliveryDate(today);
+        vo.setExemptableCount(0);
+        vo.setMonthlyLimit(limit);
+        vo.setUsedCount(used);
+        vo.setRemaining(Math.max(0, limit - used));
+        return vo;
+    }
+
+    /** 家长数据范围：仅本人绑定的学生 */
+    private Long currentParentStudentId() {
+        DataScope scope = dataScopeResolver.resolve();
+        if (scope.getStudentId() == null) {
+            throw new BusinessException("请先绑定学生信息");
+        }
+        return scope.getStudentId();
+    }
+
+    /** 某学生某日「尚未送出」的待配送任务 */
+    private List<DeliveryTask> listTodayPendingTasks(Long studentId, LocalDate date) {
+        return baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getStudentId, studentId)
+                .eq(DeliveryTask::getDeliveryDate, date)
+                .eq(DeliveryTask::getStatus, TASK_PENDING));
+    }
+
+    private int parentExemptionMonthlyLimit() {
+        // 配成 0 表示关闭该能力（管理端可随时关停）；负数视为非法，回落默认值 3
+        int configured = sysConfigService.getInt(CONFIG_PARENT_EXEMPTION_LIMIT, 3);
+        return configured < 0 ? 3 : configured;
+    }
+
+    private int currentExemptionUsed(Long studentId, LocalDate date) {
+        DeliveryParentExemption counter = parentExemptionMapper.selectOne(
+                new LambdaQueryWrapper<DeliveryParentExemption>()
+                        .eq(DeliveryParentExemption::getStudentId, studentId)
+                        .eq(DeliveryParentExemption::getExemptMonth, date.format(MONTH_FMT)));
+        return counter == null || counter.getUsedCount() == null ? 0 : counter.getUsedCount();
+    }
+
+    /**
+     * 抢占一次「当日豁免」名额（行锁读 + 条件更新），返回使用后的次数。
+     *
+     * <p>与配额池同一套并发语义：计数器是资源，`COUNT(*) &lt; N` 的判定在并发下会超限。
+     * 计数行不存在时先插入（`uk_student_month` 仲裁并发插入），撞键则回读行锁再累加。</p>
+     */
+    private int consumeExemptionQuota(Long studentId, LocalDate date, int limit) {
+        String month = date.format(MONTH_FMT);
+        DeliveryParentExemption counter = parentExemptionMapper.selectForUpdate(studentId, month);
+        if (counter == null) {
+            DeliveryParentExemption created = new DeliveryParentExemption();
+            created.setStudentId(studentId);
+            created.setExemptMonth(month);
+            created.setUsedCount(1);
+            if (idempotencyGuard.insertIgnoringDuplicate(() -> parentExemptionMapper.insert(created))) {
+                return 1;
+            }
+            // 并发下另一事务刚插入同一 (学生, 月份)：回读行锁后按条件更新累加
+            counter = parentExemptionMapper.selectForUpdate(studentId, month);
+            if (counter == null) {
+                throw new BusinessException("豁免次数记录读取失败，请重试");
+            }
+        }
+        int used = counter.getUsedCount() == null ? 0 : counter.getUsedCount();
+        if (used >= limit) {
+            throw new BusinessException("本月「当日豁免」次数已用完（" + used + "/" + limit + " 次）");
+        }
+        boolean updated = parentExemptionMapper.update(null, new LambdaUpdateWrapper<DeliveryParentExemption>()
+                .eq(DeliveryParentExemption::getId, counter.getId())
+                .eq(DeliveryParentExemption::getUsedCount, used)
+                .apply("used_count + 1 <= {0}", limit)
+                .setSql("used_count = used_count + 1")) > 0;
+        if (!updated) {
+            throw new BusinessException("本月「当日豁免」次数已用完（" + used + "/" + limit + " 次）");
+        }
+        return used + 1;
     }
 
     /**
@@ -1015,6 +1199,158 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         return count;
     }
 
+    // ==================== 退款域：可退期次探测 / 退款作废 ====================
+
+    /** 任务状态：待配送 */
+    private static final int TASK_PENDING = 1;
+    /** 任务状态：已取消 */
+    private static final int TASK_CANCELLED = 4;
+    /** 签收状态：拒收 */
+    private static final int SIGN_REJECTED = 3;
+
+    @Override
+    public List<RefundableTaskVO> listRefundableTasks(Long orderId) {
+        if (orderId == null) {
+            return Collections.emptyList();
+        }
+        OrderInfo order = orderInfoMapper.selectById(orderId);
+        if (order == null || OrderStatus.CANCELLED.getCode().equals(order.getStatus())) {
+            // R1：已退订订单的任务与"缺货取消"同形（签收=拒收且无原因分类），
+            // 计入会与退订时的全额退款（R4）重复退钱——整单排除
+            return Collections.emptyList();
+        }
+        List<DeliveryTask> candidates = new ArrayList<>();
+        candidates.addAll(baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .eq(DeliveryTask::getStatus, TASK_PENDING)
+                .orderByAsc(DeliveryTask::getDeliveryDate)
+                .orderByAsc(DeliveryTask::getId)));
+        candidates.addAll(listStockoutCancelledTasks(orderId));
+        if (candidates.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 拒收补送盒（免费补偿，不额外收费）：必须从可退盒数里扣掉，否则补送后一退款就多退钱
+        Map<Long, Integer> compensationByTargetTask = compensationBoxesByTargetTask(orderId);
+        Map<Long, String> productNames = productNames(candidates);
+        List<RefundableTaskVO> result = new ArrayList<>(candidates.size());
+        for (DeliveryTask task : candidates) {
+            int quantity = task.getQuantity() == null ? 0 : task.getQuantity();
+            int free = compensationByTargetTask.getOrDefault(task.getId(), 0);
+            int refundable = Math.max(0, quantity - free);
+            if (refundable <= 0) {
+                continue; // 纯补送任务：可退 0 盒，不进可退集（不产生"0 元退款单"）
+            }
+            boolean pending = TASK_PENDING == task.getStatus();
+            RefundableTaskVO vo = new RefundableTaskVO();
+            vo.setTaskId(task.getId());
+            vo.setTaskNo(task.getTaskNo());
+            vo.setProductId(task.getProductId());
+            vo.setProductName(productNames.get(task.getProductId()));
+            vo.setDeliveryDate(task.getDeliveryDate());
+            vo.setQuantity(quantity);
+            vo.setRefundableBoxes(refundable);
+            vo.setPending(pending);
+            vo.setStatusText(pending ? "待配送" : "缺货取消（未送达，可退）");
+            result.add(vo);
+        }
+        return result;
+    }
+
+    /**
+     * 缺货取消任务：任务已取消(4) + 签收记录为拒收(3) + 未写拒收原因分类。
+     *
+     * <p>判据必须与 {@code INV_TASK_COMPENSATION} 保持一致（它同样用
+     * {@code sign_status=3 AND reject_reason_code IS NOT NULL} 区分真拒收）。两个天然边界：</p>
+     * <ul>
+     *   <li>平移/重排作废的任务**不置**记录为拒收（{@link #relocateTask} 只改 remark，保持未签收），
+     *       因此不会被误判为"没送奶"；</li>
+     *   <li>退款自己作废的任务同样不置拒收（{@link #cancelTaskForRefund}），因此不会被退款第二次捞出来。</li>
+     * </ul>
+     */
+    private List<DeliveryTask> listStockoutCancelledTasks(Long orderId) {
+        List<DeliveryTask> cancelled = baseMapper.selectList(new LambdaQueryWrapper<DeliveryTask>()
+                .eq(DeliveryTask::getOrderId, orderId)
+                .eq(DeliveryTask::getStatus, TASK_CANCELLED));
+        if (cancelled.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<Long> taskIds = cancelled.stream().map(DeliveryTask::getId).collect(Collectors.toList());
+        Set<Long> stockoutTaskIds = deliveryRecordMapper.selectList(new LambdaQueryWrapper<DeliveryRecord>()
+                        .in(DeliveryRecord::getTaskId, taskIds)
+                        .eq(DeliveryRecord::getSignStatus, SIGN_REJECTED)
+                        .isNull(DeliveryRecord::getRejectReasonCode))
+                .stream().map(DeliveryRecord::getTaskId).collect(Collectors.toSet());
+        return cancelled.stream().filter(t -> stockoutTaskIds.contains(t.getId())).collect(Collectors.toList());
+    }
+
+    /** 汇总某订单下"落在目标任务上的拒收补送盒数"（target_task_id → Σ boxes） */
+    private Map<Long, Integer> compensationBoxesByTargetTask(Long orderId) {
+        Map<Long, Integer> boxes = new HashMap<>();
+        List<DeliveryCompensation> compensations = deliveryCompensationMapper.selectList(
+                new LambdaQueryWrapper<DeliveryCompensation>().eq(DeliveryCompensation::getOrderId, orderId));
+        for (DeliveryCompensation compensation : compensations) {
+            if (compensation.getTargetTaskId() == null) {
+                continue;
+            }
+            boxes.merge(compensation.getTargetTaskId(),
+                    compensation.getBoxes() == null ? 0 : compensation.getBoxes(), Integer::sum);
+        }
+        return boxes;
+    }
+
+    private Map<Long, String> productNames(List<DeliveryTask> tasks) {
+        Set<Long> productIds = tasks.stream().map(DeliveryTask::getProductId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        if (productIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return productMapper.selectBatchIds(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, Product::getProductName, (a, b) -> a));
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean cancelTaskForRefund(Long taskId, String refundNo) {
+        if (taskId == null) {
+            return false;
+        }
+        DeliveryTask task = getById(taskId);
+        if (task == null || task.getStatus() == null || task.getStatus() != TASK_PENDING) {
+            return false; // 已被并发送出/取消：调用方剔除、不参与计价
+        }
+        String remark = "退款作废（" + refundNo + "）";
+        // 过程层宽松迁移（attempt）：与"开始配送"并发时只有一方成功，失败即视为该期次继续配送、不计价
+        boolean cancelled = processTransitionExecutor.attempt(
+                TransitionSpec.builder()
+                        .scene(StateTransitions.SCENE_DELIVERY_TASK)
+                        .action(StateTransitions.ACTION_TASK_CANCEL)
+                        .sceneText("配送任务")
+                        .entityType("delivery_task")
+                        .entityId(task.getId())
+                        .bizNo(task.getTaskNo())
+                        .fromStatus(TASK_PENDING)
+                        .toStatus(TASK_CANCELLED)
+                        .remark(remark)
+                        .build(),
+                () -> lambdaUpdate()
+                        .eq(DeliveryTask::getId, task.getId())
+                        .eq(DeliveryTask::getStatus, TASK_PENDING)
+                        .set(DeliveryTask::getStatus, TASK_CANCELLED)
+                        .set(DeliveryTask::getRemark, remark)
+                        .update());
+        if (!cancelled) {
+            return false;
+        }
+        // 签收记录保持「未签收」，只标注备注：若置为拒收(3)，该任务会落在 R1 的"缺货取消"判据里，
+        // 下一次退款会再把同一批盒退一遍
+        deliveryRecordMapper.update(null, new LambdaUpdateWrapper<DeliveryRecord>()
+                .eq(DeliveryRecord::getTaskId, task.getId())
+                .eq(DeliveryRecord::getSignStatus, 2)
+                .set(DeliveryRecord::getRemark, remark));
+        return true;
+    }
+
     // ==================== 配送日平移 / 学期末摊平 ====================
 
     /**
@@ -1548,6 +1884,12 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (tasks.isEmpty()) {
             return Collections.emptyList();
         }
+        // 物理态 vs 信息态：被奶站申报「未送达」的任务排除出候选集——它只是"已点已送出"，
+        // 物理上没送到；按超时未签收签掉会凭空生成虚假签收与营养摄入（见 DeliveryUndeliveredReport）
+        tasks = excludeReportedTasks(tasks);
+        if (tasks.isEmpty()) {
+            return Collections.emptyList();
+        }
         return deliveryRecordMapper.selectList(new LambdaQueryWrapper<DeliveryRecord>()
                         .in(DeliveryRecord::getTaskId,
                                 tasks.stream().map(DeliveryTask::getId).collect(Collectors.toSet()))
@@ -1569,8 +1911,38 @@ public class DeliveryTaskServiceImpl extends ServiceImpl<DeliveryTaskMapper, Del
         if (task.getDeliveryDate() == null || !task.getDeliveryDate().isBefore(LocalDate.now())) {
             return; // 未到兜底窗口（当天送出的留给老师签收）：跳过
         }
+        // 与候选集同一条闸门：单条入口也要挡住"已申报未送达"的任务。
+        // 候选集是分批取的，两次取之间可能新插入一条申报（奶站在次日 00:30 前补报），
+        // 只在候选集里过滤会漏；单条入口再判一次，才是"兜底不会签掉未送达任务"的保证。
+        if (isUndeliveredReported(task.getId())) {
+            log.warn(String.format("[自动签收任务] 任务 %s 已被申报未送达，跳过自动签收，交由人工跟进", task.getTaskNo()));
+            return;
+        }
         // 复用人工签收共用流程：记录未签收→已签收（CAS）、任务配送中→已完成、生成营养摄入、订单全终态自动完成
         doSign(record, AUTO_SIGN_PERSON, AUTO_SIGN_REMARK);
+    }
+
+    /** 从候选任务中剔除「已被申报未送达」的任务（申报是奶站对物理未送达的声明） */
+    private List<DeliveryTask> excludeReportedTasks(List<DeliveryTask> tasks) {
+        Set<Long> reported = reportedTaskIds(tasks.stream().map(DeliveryTask::getId).collect(Collectors.toList()));
+        if (reported.isEmpty()) {
+            return tasks;
+        }
+        return tasks.stream().filter(t -> !reported.contains(t.getId())).collect(Collectors.toList());
+    }
+
+    /** 给定任务里被申报「未送达」的任务 ID 集合 */
+    private Set<Long> reportedTaskIds(List<Long> taskIds) {
+        if (taskIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        List<Long> reported = undeliveredReportMapper.selectReportedTaskIds(taskIds);
+        return reported == null || reported.isEmpty() ? Collections.emptySet() : new HashSet<>(reported);
+    }
+
+    /** 单个任务是否被申报未送达 */
+    private boolean isUndeliveredReported(Long taskId) {
+        return !reportedTaskIds(Collections.singletonList(taskId)).isEmpty();
     }
 
     @Override
