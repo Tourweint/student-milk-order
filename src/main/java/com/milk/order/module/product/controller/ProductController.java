@@ -34,9 +34,10 @@ import java.util.List;
  * 奶品：GET /api/product/list、GET/POST/PUT/DELETE /api/product[...]
  * 套餐：GET/POST/PUT/DELETE /api/product/package[...]（仅学期套餐）
  * 每日机动配额（单日零散订购用，无传统仓库库存）：
- * - GET /api/product/quota/list          配额列表（日期区间）
- * - GET /api/product/quota/remaining     某日剩余机动盒数
- * - PUT /api/product/quota               设置某日机动配额
+ * - GET  /api/product/quota/list           配额列表（日期区间）
+ * - GET  /api/product/quota/remaining      某日某品种剩余机动盒数
+ * - GET  /api/product/quota/remaining/list 某日全品种剩余机动盒数
+ * - PUT  /api/product/quota/batch          批量设置某日机动配额（发行入口，受仓库余量 R5′ 封顶）
  * 批次追溯钩子（仅召回反查，不参与业务流转）：
  * - GET    /api/product/batch/list       批次列表
  * - POST   /api/product/batch            新增批次

@@ -88,6 +88,7 @@ const menuList: { path: string; title: string; icon: string; roles?: string[] }[
   { path: '/refund', title: '退款管理', icon: 'Money', roles: ['ADMIN'] },
   { path: '/delivery-station', title: '配送站面板', icon: 'Box', roles: ['ADMIN', 'DELIVERY'] },
   { path: '/delivery', title: '配送管理', icon: 'Van', roles: ['ADMIN', 'TEACHER'] },
+  { path: '/delivery-calendar', title: '配送日历', icon: 'Calendar', roles: ['ADMIN'] },
   { path: '/nutrition', title: '营养统计', icon: 'Histogram', roles: ['ADMIN', 'TEACHER'] },
   { path: '/system', title: '系统管理', icon: 'Setting', roles: ['ADMIN'] }
 ]

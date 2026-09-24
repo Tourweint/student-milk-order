@@ -11,11 +11,18 @@
 
     <el-alert
       type="info" :closable="false" class="quota-tip"
-      title="每日机动配额按品种设置，仅用于单日零散订购（临时补订、换口味、插班临时订购）；当日未售完自动结转次日继续可售，按 3 天计划顺延窗口滚动、窗口外自动作废（该参数是商务约定值，不是牛奶保质期）。学期套餐不占用配额。留空的品种当日不可零散订购。到货批次为可选标注，仅用于批次召回反查，不影响扣减与结转。"
+      title="每日机动配额按品种设置，仅用于单日零散订购（临时补订、换口味、插班临时订购）；发行上限受仓库余量封顶，余量不足时请先在「仓库余量」页签登记到货。当日未售完自动结转次日继续可售，按 3 天计划顺延窗口滚动、窗口外自动作废（该参数是商务约定值，不是牛奶保质期）。学期套餐不占用配额。留空的品种当日不可零散订购。到货批次为可选标注，仅用于批次召回反查，不影响扣减与结转。"
     />
 
     <el-table v-loading="loading" :data="productRows" stripe>
       <el-table-column prop="productName" label="奶品" min-width="140" />
+      <el-table-column label="仓库余量（盒）" width="140">
+        <template #default="{ row }">
+          <span :class="{ 'quota-low': (balanceMap[row.productId] ?? 0) <= 0 }">
+            {{ balanceMap[row.productId] ?? 0 }}
+          </span>
+        </template>
+      </el-table-column>
       <el-table-column label="当日配额（盒）" width="170">
         <template #default="{ row }">
           <el-input-number v-model="row.inputQuota" :min="0" :max="9999" size="small" placeholder="未设置" />
@@ -62,6 +69,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getQuotaList, getQuotaRemainingList, setQuotaBatch, getProductList, getBatchList } from '@/api/product'
+import { getWarehouseBalance } from '@/api/warehouse'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -69,6 +77,7 @@ const editDate = ref<string>(defaultDate())
 const productRows = ref<any[]>([])
 const recentRows = ref<any[]>([])
 const batchList = ref<any[]>([])
+const balanceMap = ref<Record<number, number>>({})
 
 /** 某品种可选批次（已停用状态 3 不提供；未建档的批号可直接输入新建） */
 function batchOptionsOf(productId: number) {
@@ -83,16 +92,30 @@ function plusDays(d: Date, n: number) {
   return new Date(d.getTime() + n * 86400000).toISOString().slice(0, 10)
 }
 
+function toBalanceMap(res: any): Record<number, number> {
+  const map: Record<number, number> = {}
+  for (const b of (res?.data ?? []) as any[]) {
+    map[b.productId] = b.balance
+  }
+  return map
+}
+
+async function fetchBalance() {
+  balanceMap.value = toBalanceMap(await getWarehouseBalance())
+}
+
 async function fetchEditData() {
   if (!editDate.value) return
   loading.value = true
   try {
-    const [prodRes, remainRes, dayRes, batchRes] = await Promise.all([
+    const [prodRes, remainRes, dayRes, batchRes, balanceRes] = await Promise.all([
       getProductList({ pageNum: 1, pageSize: 100 }),
       getQuotaRemainingList(editDate.value),
       getQuotaList({ startDate: editDate.value, endDate: editDate.value }),
-      getBatchList()
+      getBatchList(),
+      getWarehouseBalance()
     ])
+    balanceMap.value = toBalanceMap(balanceRes)
     batchList.value = (batchRes.data ?? []) as any[]
     const remainingMap: Record<number, number> = {}
     for (const r of (remainRes.data ?? []) as any[]) {

@@ -21,7 +21,12 @@ public class PackageSaveRequest {
     @NotBlank(message = "套餐名称不能为空")
     private String packageName;
 
-    /** 套餐类型：1-按月套餐，2-按学期套餐 */
+    /**
+     * 套餐类型：仅保留 {@code 2-按学期套餐}（全校统一预约定制）。
+     *
+     * <p>月度套餐已下线，服务端在保存时**强制置为 2**，前端不再提供类型选择；
+     * 本字段为兼容旧数据与请求体而保留。</p>
+     */
     private Integer packageType;
 
     private String description;

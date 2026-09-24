@@ -272,6 +272,11 @@
           </el-table-column>
         </el-table>
       </el-tab-pane>
+
+      <!-- 机动配额（仅管理员）：与「仓库余量」同页，发行上限由余量封顶，登记到货后可直接设配额 -->
+      <el-tab-pane v-if="isAdmin" label="每日机动配额" name="quota">
+        <QuotaTab />
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
@@ -287,6 +292,7 @@ import {
 } from '@/api/delivery'
 import { getWarehouseBalance, receiptWarehouse } from '@/api/warehouse'
 import { useUserStore } from '@/stores/user'
+import QuotaTab from './components/QuotaTab.vue'
 
 /** 某配送日期按班级汇总（后端 /delivery/task/summary） */
 interface DailySummary {

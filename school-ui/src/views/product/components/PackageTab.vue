@@ -5,10 +5,11 @@
     </div>
     <el-table v-loading="loading" :data="list" stripe>
       <el-table-column prop="packageName" label="套餐名称" min-width="160" />
-      <el-table-column label="类型" width="110">
+      <el-table-column label="类型" width="130">
         <template #default="{ row }">
-          <el-tag :type="row.packageType === 1 ? '' : 'success'" size="small">
-            {{ row.packageType === 1 ? '按月套餐' : '按学期套餐' }}
+          <!-- 月度套餐已下线：历史数据如实显示并标红，其余一律按学期套餐 -->
+          <el-tag :type="row.packageType === 1 ? 'danger' : 'success'" size="small">
+            {{ row.packageType === 1 ? '按月套餐（已下线）' : '按学期套餐' }}
           </el-tag>
         </template>
       </el-table-column>
@@ -45,11 +46,10 @@
         <el-form-item label="套餐名称" prop="packageName">
           <el-input v-model="form.packageName" placeholder="如：纯牛奶月度套餐" />
         </el-form-item>
-        <el-form-item label="套餐类型" prop="packageType">
-          <el-radio-group v-model="form.packageType">
-            <el-radio :value="1">按月套餐</el-radio>
-            <el-radio :value="2">按学期套餐</el-radio>
-          </el-radio-group>
+        <el-form-item label="套餐类型">
+          <!-- 月度套餐已下线，服务端强制为按学期，故不再提供选择 -->
+          <el-tag type="success" size="small">按学期套餐</el-tag>
+          <span class="type-hint">月度套餐已下线，本字段无需选择</span>
         </el-form-item>
         <el-form-item label="原价(元)">
           <el-input-number v-model="form.originalPrice" :min="0" :precision="2" :step="1" />
@@ -127,12 +127,12 @@ const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
 const dateRange = ref<[string, string] | null>(null)
 const form = reactive<any>({
-  id: null, packageName: '', packageType: 1, originalPrice: 0, discountPrice: 0,
+  // 套餐类型固定为按学期（2）：月度套餐已下线，服务端保存时亦会强制置为 2
+  id: null, packageName: '', packageType: 2, originalPrice: 0, discountPrice: 0,
   startDate: '', endDate: '', sort: 0, status: 1, description: ''
 })
 const rules: FormRules = {
   packageName: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
-  packageType: [{ required: true, message: '请选择套餐类型', trigger: 'change' }],
   discountPrice: [{ required: true, message: '请输入优惠价', trigger: 'blur' }]
 }
 
@@ -140,7 +140,8 @@ async function openDialog(row?: any) {
   Object.assign(form, {
     id: row?.id ?? null,
     packageName: row?.packageName ?? '',
-    packageType: row?.packageType ?? 1,
+    // 一律按学期：历史月度套餐在编辑保存后顺带收敛为学期套餐
+    packageType: 2,
     originalPrice: row?.originalPrice ?? 0,
     discountPrice: row?.discountPrice ?? 0,
     startDate: row?.startDate ?? '',
@@ -216,6 +217,7 @@ onMounted(async () => {
 .toolbar { margin-bottom: 16px; }
 .discount { color: #f56c6c; font-weight: 600; }
 .full-width { width: 100%; }
+.type-hint { margin-left: 8px; font-size: 12px; color: #909399; }
 .pkg-items {
   width: 100%;
   .pkg-item-row {
